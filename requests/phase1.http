@@ -1,0 +1,65 @@
+### package_query：套餐查询
+POST http://127.0.0.1:8000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "user_001",
+  "session_id": "s1",
+  "role": "user",
+  "message": "我想查一下当前套餐"
+}
+
+### bill_query：账单查询
+POST http://127.0.0.1:8000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "user_001",
+  "session_id": "s1",
+  "role": "user",
+  "message": "我这个月账单多少钱"
+}
+
+### package_change：套餐变更
+POST http://127.0.0.1:8000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "user_001",
+  "session_id": "s1",
+  "role": "user",
+  "message": "帮我把套餐改成5G畅享套餐"
+}
+
+### ticket_create：创建工单
+POST http://127.0.0.1:8000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "user_001",
+  "session_id": "s1",
+  "role": "user",
+  "message": "帮我创建一个网络故障工单"
+}
+
+### fault_diagnosis：故障排查
+POST http://127.0.0.1:8000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "user_001",
+  "session_id": "s1",
+  "role": "user",
+  "message": "宽带连不上怎么办"
+}
+
+### faq_query：知识库问答
+POST http://127.0.0.1:8000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "user_001",
+  "session_id": "s1",
+  "role": "user",
+  "message": "套餐办理规则是什么"
+}
