@@ -7,14 +7,17 @@ class MockBusinessClient:
 
     def __init__(self) -> None:
         self._profiles = {
+            "user_001": {"user_id": "user_001", "name": "演示用户", "level": "gold"},
             "u1001": {"user_id": "u1001", "name": "张先生", "level": "gold"},
             "u1002": {"user_id": "u1002", "name": "李女士", "level": "standard"},
         }
         self._packages = {
+            "user_001": {"package_name": "5G畅享套餐", "monthly_fee": 129, "data_quota": "60GB"},
             "u1001": {"package_name": "5G畅享套餐", "monthly_fee": 129, "data_quota": "60GB"},
             "u1002": {"package_name": "基础套餐", "monthly_fee": 59, "data_quota": "20GB"},
         }
         self._bills = {
+            ("user_001", "本月"): {"month": "本月", "amount": 156.8, "status": "已出账", "items": ["套餐月费", "流量包"]},
             ("u1001", "本月"): {"month": "本月", "amount": 156.8, "status": "已出账", "items": ["套餐月费", "流量包"]},
             ("u1002", "本月"): {"month": "本月", "amount": 68.0, "status": "已出账", "items": ["套餐月费", "语音通话"]},
         }
@@ -52,4 +55,3 @@ class MockBusinessClient:
             "description": description[:120],
             "status": "created",
         }
-

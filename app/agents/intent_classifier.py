@@ -25,11 +25,11 @@ class IntentClassifier:
             slots.setdefault("month", self._extract_month(text))
             return IntentResult(intent="bill_query", slots=slots, confidence=0.88)
 
-        if self._contains(text, ["创建工单", "报修", "投诉", "售后工单", "转人工"]):
+        if self._is_ticket_create(text):
             slots.setdefault("issue_type", self._extract_issue_type(text))
             return IntentResult(intent="ticket_create", slots=slots, confidence=0.86)
 
-        if self._contains(text, ["不能上网", "断网", "没信号", "故障", "宽带慢", "网络慢", "无法连接"]):
+        if self._contains(text, ["不能上网", "断网", "没信号", "故障", "宽带慢", "网络慢", "无法连接", "连不上"]):
             slots.setdefault("issue_type", self._extract_issue_type(text))
             return IntentResult(intent="fault_diagnosis", slots=slots, confidence=0.84)
 
@@ -64,10 +64,24 @@ class IntentClassifier:
         return any(keyword in text for keyword in keywords)
 
     def _is_package_change(self, text: str) -> bool:
-        direct_keywords = ["改套餐", "变更套餐", "升级套餐", "降级套餐", "办理套餐", "换套餐"]
+        if self._is_package_faq(text):
+            return False
+
+        direct_keywords = ["改套餐", "变更套餐", "升级套餐", "降级套餐", "办理套餐", "换套餐", "套餐改成"]
         if self._contains(text, direct_keywords):
+            return True
+        if self._contains(text, ["改成", "变成", "调整为", "切换到"]) and self._contains(text, ["套餐", "5G畅享"]):
             return True
         return self._contains(text, ["办理", "开通", "申请"]) and self._contains(
             text,
             ["套餐", "5G畅享", "家庭融合", "校园套餐", "基础套餐"],
         )
+
+    def _is_package_faq(self, text: str) -> bool:
+        # 同样含有“办理/套餐”的句子可能是在咨询规则，而不是要执行套餐变更。
+        return self._contains(text, ["规则", "政策", "说明", "介绍", "是什么", "什么时候", "怎么收费"])
+
+    def _is_ticket_create(self, text: str) -> bool:
+        if self._contains(text, ["创建工单", "报修", "投诉", "售后工单", "转人工"]):
+            return True
+        return "工单" in text and self._contains(text, ["创建", "新建", "提交", "帮我"])
