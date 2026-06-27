@@ -9,6 +9,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+data/vector_store/
+
 .idea/
 .vscode/
 

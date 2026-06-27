@@ -15,6 +15,14 @@ class Settings:
     app_env: str = os.getenv("APP_ENV", "local")
     memory_max_turns: int = int(os.getenv("MEMORY_MAX_TURNS", "8"))
     mock_knowledge_path: str = os.getenv("MOCK_KNOWLEDGE_PATH", "data/mock_knowledge.md")
+    knowledge_dir: str = os.getenv("KNOWLEDGE_DIR", "data/knowledge")
+    vector_store: str = os.getenv("VECTOR_STORE", "mock")
+    vector_store_dir: str = os.getenv("VECTOR_STORE_DIR", "data/vector_store")
+    chroma_collection: str = os.getenv("CHROMA_COLLECTION", "customer_service_knowledge")
+    rag_top_k: int = int(os.getenv("RAG_TOP_K", "3"))
+    chunk_size: int = int(os.getenv("CHUNK_SIZE", "500"))
+    chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "80"))
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "mock")
     safety_blocked_words: list[str] = field(
         default_factory=lambda: _split_env(
             "SAFETY_BLOCKED_WORDS",
@@ -30,4 +38,3 @@ class Settings:
 
 
 settings = Settings()
-

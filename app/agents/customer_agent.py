@@ -23,19 +23,22 @@ class CustomerAgent:
         intent = "unknown"
         slots: dict[str, object] = {}
         try:
-            self.safety_guard.check_input(request.message)
-            intent_result = self.intent_classifier.classify(request.message)
+            self.safety_guard.check_input(request.message)  # 检查用户输入有没有敏感词
+            intent_result = self.intent_classifier.classify(request.message) # 意图识别
             intent = intent_result.intent
             slots = intent_result.slots
 
+            # 权限检查
             target_user_id = self.permission_checker.resolve_target_user_id(request, slots)
             audit_event = self.permission_checker.check(request, target_user_id)
             if audit_event:
                 log_event("audit.agent_access", audit_event)
 
+            # 读取会话记忆
             recent_turns = self.memory.get_recent(request.session_id)
             trace.add_attribute("memory_turn_count", len(recent_turns))
 
+            # 路由
             route_result = self.router.route(intent_result, request.message, target_user_id)
             self.safety_guard.check_output(route_result.answer)
             self.memory.add_turn(request.session_id, request.message, route_result.answer)

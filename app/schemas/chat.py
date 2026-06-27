@@ -19,6 +19,7 @@ class Source(BaseModel):
     title: str
     content: str
     score: float
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolCall(BaseModel):
@@ -44,4 +45,3 @@ class ChatResponse(BaseModel):
     trace_id: str
     latency_ms: float
     error: str | None = None
-

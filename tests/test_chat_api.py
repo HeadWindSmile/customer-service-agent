@@ -148,4 +148,4 @@ def test_phase1_fault_example_prefers_fault_source():
     data = response.json()
 
     assert data["intent"] == "fault_diagnosis"
-    assert data["sources"][0]["title"] == "故障排查"
+    assert data["sources"][0]["title"] == "故障排查说明"

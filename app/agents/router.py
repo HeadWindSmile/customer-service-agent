@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.prompts import FAQ_ANSWER_TEMPLATE, NO_SOURCE_ANSWER
-from app.rag.retriever import MockKnowledgeRetriever
+from app.rag.retriever import KnowledgeRetriever
 from app.schemas.chat import IntentResult, Source, ToolCall
 from app.tools.bill_tool import BillTool
 from app.tools.business_client import MockBusinessClient
@@ -25,7 +25,7 @@ class CustomerRouter:
 
     def __init__(self) -> None:
         business_client = MockBusinessClient()
-        self.retriever = MockKnowledgeRetriever()
+        self.retriever = KnowledgeRetriever()
         self.package_tool = PackageTool(business_client)
         self.bill_tool = BillTool(business_client)
         self.ticket_tool = TicketTool(business_client)
@@ -143,4 +143,3 @@ class CustomerRouter:
                 latency_ms=elapsed_ms() - started,
             )
             return output, call
-

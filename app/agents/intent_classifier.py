@@ -21,6 +21,9 @@ class IntentClassifier:
         if self._contains(text, ["当前套餐", "我的套餐", "套餐信息", "查套餐", "套餐查询"]):
             return IntentResult(intent="package_query", slots=slots, confidence=0.9)
 
+        if self._is_bill_faq(text):
+            return IntentResult(intent="faq_query", slots=slots, confidence=0.76)
+
         if self._contains(text, ["账单", "话费", "扣费", "欠费", "消费明细"]):
             slots.setdefault("month", self._extract_month(text))
             return IntentResult(intent="bill_query", slots=slots, confidence=0.88)
@@ -85,3 +88,8 @@ class IntentClassifier:
         if self._contains(text, ["创建工单", "报修", "投诉", "售后工单", "转人工"]):
             return True
         return "工单" in text and self._contains(text, ["创建", "新建", "提交", "帮我"])
+
+    def _is_bill_faq(self, text: str) -> bool:
+        if not self._contains(text, ["账单", "话费", "扣费", "费用", "超量"]):
+            return False
+        return self._contains(text, ["为什么", "原因", "规则", "说明", "组成", "是什么", "怎么算"])
