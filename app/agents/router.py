@@ -2,7 +2,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agents.prompts import FAQ_ANSWER_TEMPLATE, NO_SOURCE_ANSWER
+from app.agents.chains.rag_answer_chain import RagAnswerChain
+from app.agents.prompts import NO_SOURCE_ANSWER
 from app.rag.retriever import KnowledgeRetriever
 from app.schemas.chat import IntentResult, Source, ToolCall
 from app.tools.bill_tool import BillTool
@@ -26,16 +27,23 @@ class CustomerRouter:
     def __init__(self) -> None:
         business_client = MockBusinessClient()
         self.retriever = KnowledgeRetriever()
+        self.rag_answer_chain = RagAnswerChain()
         self.package_tool = PackageTool(business_client)
         self.bill_tool = BillTool(business_client)
         self.ticket_tool = TicketTool(business_client)
         self.user_tool = UserTool(business_client)
 
-    def route(self, intent_result: IntentResult, message: str, user_id: str) -> RouteResult:
+    def route(
+        self,
+        intent_result: IntentResult,
+        message: str,
+        user_id: str,
+        recent_turns: list[dict[str, str]] | None = None,
+    ) -> RouteResult:
         intent = intent_result.intent
         slots = intent_result.slots
         if intent == "faq_query":
-            return self._handle_faq(message)
+            return self._handle_faq(message, recent_turns or [])
         if intent == "package_query":
             return self._handle_package_query(user_id)
         if intent == "package_change":
@@ -43,17 +51,21 @@ class CustomerRouter:
         if intent == "bill_query":
             return self._handle_bill_query(user_id, slots)
         if intent == "fault_diagnosis":
-            return self._handle_fault_diagnosis(message)
+            return self._handle_fault_diagnosis(message, recent_turns or [])
         if intent == "ticket_create":
             return self._handle_ticket_create(user_id, slots, message)
         return RouteResult(answer="暂时无法识别你的问题，建议转人工客服。")
 
-    def _handle_faq(self, message: str) -> RouteResult:
+    def _handle_faq(self, message: str, recent_turns: list[dict[str, str]] | None = None) -> RouteResult:
         sources = self.retriever.search(message, top_k=3)
         if not sources:
             return RouteResult(answer=NO_SOURCE_ANSWER)
-        top_source = sources[0]
-        answer = FAQ_ANSWER_TEMPLATE.format(title=top_source.title, content=top_source.content)
+        answer = self.rag_answer_chain.generate(
+            question=message,
+            sources=sources,
+            conversation_context=recent_turns or [],
+            scenario="faq",
+        )
         return RouteResult(answer=answer, sources=sources)
 
     def _handle_package_query(self, user_id: str) -> RouteResult:
@@ -94,14 +106,16 @@ class CustomerRouter:
         answer = f"已提交套餐变更申请，目标套餐：{output['target_package']}，单号：{output['order_id']}。"
         return RouteResult(answer=answer, tool_calls=[call])
 
-    def _handle_fault_diagnosis(self, message: str) -> RouteResult:
+    def _handle_fault_diagnosis(self, message: str, recent_turns: list[dict[str, str]] | None = None) -> RouteResult:
         sources = self.retriever.search(message, top_k=2)
-        answer = (
-            "建议先按以下步骤排查：1. 重启光猫和路由器；2. 检查光猫指示灯；"
-            "3. 确认是否存在欠费停机；4. 如果仍未恢复，可创建售后工单。"
+        if not sources:
+            return RouteResult(answer=NO_SOURCE_ANSWER)
+        answer = self.rag_answer_chain.generate(
+            question=message,
+            sources=sources,
+            conversation_context=recent_turns or [],
+            scenario="fault_diagnosis",
         )
-        if sources:
-            answer = f"{answer}\n参考知识库：{sources[0].title}。"
         return RouteResult(answer=answer, sources=sources)
 
     def _handle_ticket_create(self, user_id: str, slots: dict[str, Any], message: str) -> RouteResult:

@@ -23,6 +23,13 @@ class Settings:
     chunk_size: int = int(os.getenv("CHUNK_SIZE", "500"))
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "80"))
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "mock")
+    llm_provider: str = os.getenv("LLM_PROVIDER", "mock").lower()
+    dashscope_api_key: str = os.getenv("DASHSCOPE_API_KEY", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    openai_base_url: str = os.getenv("OPENAI_BASE_URL", "")
+    llm_model_name: str = os.getenv("LLM_MODEL_NAME", "qwen-plus")
+    llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0"))
+    llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "10"))
     safety_blocked_words: list[str] = field(
         default_factory=lambda: _split_env(
             "SAFETY_BLOCKED_WORDS",

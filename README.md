@@ -6,7 +6,7 @@
 
 ## 当前阶段能力
 
-当前处于第 2 阶段：RAG 知识库链路。
+当前处于第 3 阶段：LLM + LCEL 生成链路。
 
 已实现：
 
@@ -20,6 +20,10 @@
 8. 结构化响应：`answer`、`intent`、`slots`、`sources`、`tool_calls`、`trace_id`、`latency_ms`。
 9. 结构化 JSON 日志和轻量 trace。
 10. 从 `data/knowledge/` 加载 Markdown/TXT，完成清洗、分块、MockEmbedding、向量检索和 sources 引用。
+11. 使用 LangChain LCEL 实现 RAG Answer Chain：`Prompt -> LLM -> StrOutputParser`。
+12. 默认 `MockLLM`，不配置 API Key 也能跑通问答链路。
+13. 可通过 OpenAI-compatible API 接入 `qwen-plus` 或其他兼容模型。
+14. sources 为空时直接兜底转人工，不允许 LLM 编造答案。
 
 ## 架构说明
 
@@ -31,7 +35,8 @@ POST /api/chat
   -> guard.py 输入安全检查
   -> intent_classifier.py 意图识别
   -> router.py 路由分发
-  -> RAG retriever / tools mock
+  -> RAG retriever + LCEL answer chain / tools mock
+  -> qwen-plus/OpenAI-compatible LLM 或 MockLLM fallback
   -> guard.py 输出安全检查
   -> tracing.py + logger.py 记录 trace
   -> 返回结构化结果
@@ -76,6 +81,35 @@ python scripts/ingest_knowledge.py
 
 默认使用 `MockEmbedding` 和本地 mock vector store，索引写入 `data/vector_store/`。该目录是运行时产物，不需要提交。
 
+## 大模型配置
+
+默认本地模式不需要配置任何 Key：
+
+```bash
+LLM_PROVIDER=mock
+```
+
+接入 qwen-plus：
+
+```bash
+LLM_PROVIDER=qwen
+DASHSCOPE_API_KEY=你的 DashScope Key
+LLM_MODEL_NAME=qwen-plus
+LLM_TEMPERATURE=0
+```
+
+接入 OpenAI-compatible API：
+
+```bash
+LLM_PROVIDER=openai_compatible
+OPENAI_API_KEY=你的 API Key
+OPENAI_BASE_URL=https://your-compatible-endpoint/v1
+LLM_MODEL_NAME=你的模型名称
+LLM_TEMPERATURE=0
+```
+
+如果 Key 缺失、依赖不可用或真实模型调用异常，系统会 fallback 到 `MockLLM`，保证本地最小版本仍能启动和测试。
+
 ## 当前 RAG 架构
 
 ```text
@@ -86,10 +120,21 @@ data/knowledge/*.md 或 *.txt
   -> embeddings.py 生成 mock embedding
   -> vector_store.py 写入 mock/chroma store
   -> retriever.py top_k 检索
-  -> /api/chat 返回 sources
+  -> rag_answer_chain.py 使用 LCEL 生成 answer
+  -> /api/chat 返回 answer + sources
 ```
 
-当前 answer 仍然用模板生成，不接真实大模型。真实 LLM + LCEL 属于第 3 阶段。
+第 3 阶段的 LCEL 链路：
+
+```text
+retrieved_sources + user_question + conversation_context
+  -> ChatPromptTemplate
+  -> qwen-plus / OpenAI-compatible LLM / MockLLM
+  -> StrOutputParser
+  -> answer
+```
+
+Prompt 中强约束：只能基于检索资料回答，不得编造资费、赔偿或办理承诺；如果资料不足，必须说明无法确认并建议转人工客服。代码层也会在 `sources` 为空时直接返回兜底文案，不进入 LLM。
 
 ## curl 示例
 
@@ -167,6 +212,15 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 5. MilvusVectorStore placeholder。
 6. `/api/chat` 的 FAQ 和故障排查链路返回真实 sources。
 
-## 第三阶段扩展计划
+## 第三阶段已实现内容
 
-下一阶段再接入真实 LLM + LCEL 生成链路，后续继续扩展 Redis Cluster、qwen-plus、RocketMQ、BGE Embedding、BGE Reranker、Prometheus。
+第三阶段把模板式回答升级为可配置的大模型生成链路：
+
+1. 新增 `app/llm/`，支持 `mock`、`qwen`、`openai_compatible` 三类 provider。
+2. 新增 `app/agents/chains/rag_answer_chain.py`，使用 LCEL 管道表达式组织 RAG Answer Chain。
+3. FAQ 和故障排查链路先检索 sources，再生成客服回答。
+4. 默认 `temperature=0`，降低回答随机性。
+5. 真实 LLM 不可用时 fallback 到 `MockLLM`。
+6. sources 为空时不调用 LLM，直接建议转人工客服。
+
+后续阶段继续扩展 Redis Cluster、结构化 LLM 意图识别、RocketMQ、BGE Embedding、BGE Reranker、Prometheus。

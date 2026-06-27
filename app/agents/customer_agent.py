@@ -39,7 +39,12 @@ class CustomerAgent:
             trace.add_attribute("memory_turn_count", len(recent_turns))
 
             # 路由
-            route_result = self.router.route(intent_result, request.message, target_user_id)
+            route_result = self.router.route(
+                intent_result,
+                request.message,
+                target_user_id,
+                recent_turns=recent_turns,
+            )
             self.safety_guard.check_output(route_result.answer)
             self.memory.add_turn(request.session_id, request.message, route_result.answer)
 
@@ -84,4 +89,3 @@ class CustomerAgent:
                 latency_ms=trace.latency_ms,
                 error=str(exc),
             )
-

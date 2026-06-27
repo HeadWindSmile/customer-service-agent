@@ -9,11 +9,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 1 阶段：最小可运行企业级 AI 客服骨架",
+        description="第 3 阶段：LLM + LCEL 生成链路",
     )
     app.include_router(chat_router)
     return app
 
 
 app = create_app()
-
