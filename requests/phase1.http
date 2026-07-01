@@ -63,3 +63,17 @@ Content-Type: application/json
   "role": "user",
   "message": "套餐办理规则是什么"
 }
+
+
+
+
+### faq_query：知识库问答
+POST http://127.0.0.1:8000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "user_001",
+  "session_id": "s1",
+  "role": "user",
+  "message": "套餐变更什么时候生效？"
+}
