@@ -34,6 +34,8 @@ class Settings:
     llm_model_name: str = os.getenv("LLM_MODEL_NAME", "qwen-plus")
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0"))
     llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "10"))
+    intent_rule_direct_threshold: float = float(os.getenv("INTENT_RULE_DIRECT_THRESHOLD", "0.85"))
+    intent_low_confidence_threshold: float = float(os.getenv("INTENT_LOW_CONFIDENCE_THRESHOLD", "0.6"))
     safety_blocked_words: list[str] = field(
         default_factory=lambda: _split_env(
             "SAFETY_BLOCKED_WORDS",

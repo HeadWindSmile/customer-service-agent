@@ -55,3 +55,13 @@ class MockBusinessClient:
             "description": description[:120],
             "status": "created",
         }
+
+    def query_ticket(self, user_id: str, ticket_id: str) -> dict:
+        """模拟售后系统工单查询接口，第四阶段只补 Router 场景闭环。"""
+
+        return {
+            "ticket_id": ticket_id,
+            "user_id": user_id,
+            "status": "processing",
+            "summary": "工单已受理，售后专员正在跟进。",
+        }

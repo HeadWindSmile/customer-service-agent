@@ -32,7 +32,7 @@ def test_faq_query_returns_real_knowledge_sources():
 def test_billing_faq_uses_billing_policy_source():
     data = post_chat("账单里为什么会有超量流量费用？").json()
 
-    assert data["intent"] == "faq_query"
+    assert data["intent"] == "bill_explain"
     assert data["sources"][0]["title"] == "账单政策说明"
     assert "超量" in data["sources"][0]["content"]
 

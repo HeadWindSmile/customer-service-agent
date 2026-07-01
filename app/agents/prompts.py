@@ -5,6 +5,8 @@ FAQ_ANSWER_TEMPLATE = (
 
 NO_SOURCE_ANSWER = "当前知识库未找到相关信息，建议转人工客服进一步确认。"
 
+LOW_CONFIDENCE_ANSWER = "我还不能确定你的具体诉求。请补充说明你是想查套餐、查账单、咨询规则、排查故障，还是创建/查询工单。"
+
 RAG_ANSWER_SYSTEM_PROMPT = """你是企业 AI 客服系统中的知识库问答助手。
 
 回答必须遵守以下约束：

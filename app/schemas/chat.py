@@ -34,12 +34,15 @@ class IntentResult(BaseModel):
     intent: str
     slots: dict[str, Any] = Field(default_factory=dict)
     confidence: float = Field(ge=0.0, le=1.0)
+    reason: str = ""
 
 
 class ChatResponse(BaseModel):
     answer: str
     intent: str
     slots: dict[str, Any]
+    confidence: float = Field(ge=0.0, le=1.0)
+    intent_reason: str = ""
     sources: list[Source]
     tool_calls: list[ToolCall]
     trace_id: str

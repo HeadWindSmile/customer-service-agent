@@ -93,4 +93,8 @@ def _unique_source_titles(sources: list[Source]) -> list[str]:
 def _scenario_instruction(scenario: str) -> str:
     if scenario == "fault_diagnosis":
         return "故障排查场景：优先给出可执行排查步骤，资料不足时不要补充未经确认的故障原因，可建议创建售后工单。"
+    if scenario == "bill_explain":
+        return "账单解释场景：只能解释知识库中的费用规则，具体金额和明细必须以业务系统查询结果为准。"
+    if scenario == "package_recommend":
+        return "套餐推荐场景：只能基于知识库说明给出选择建议，不要承诺用户一定可办理或一定更优惠。"
     return "知识库咨询场景：直接回答用户问题，保持简洁专业。"

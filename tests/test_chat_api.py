@@ -19,10 +19,21 @@ def post_chat(message: str, **overrides):
 
 
 def assert_base_response(data: dict):
-    for key in ["answer", "intent", "slots", "sources", "tool_calls", "trace_id", "latency_ms"]:
+    for key in [
+        "answer",
+        "intent",
+        "slots",
+        "confidence",
+        "intent_reason",
+        "sources",
+        "tool_calls",
+        "trace_id",
+        "latency_ms",
+    ]:
         assert key in data
     assert data["trace_id"]
     assert isinstance(data["latency_ms"], (int, float))
+    assert 0 <= data["confidence"] <= 1
 
 
 def test_faq_query_returns_sources():

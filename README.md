@@ -6,24 +6,28 @@
 
 ## 当前阶段能力
 
-当前处于第 3 阶段：LLM + LCEL 生成链路。
+当前处于第 4 阶段：意图识别与多场景 Router 升级。
 
 已实现：
 
 1. `POST /api/chat` 接口。
-2. 规则版意图识别，支持 6 类意图：`faq_query`、`package_query`、`package_change`、`bill_query`、`fault_diagnosis`、`ticket_create`。
-3. Router 分发机制：FAQ 和故障排查走真实知识库检索，套餐、账单、工单走 mock 业务工具。
-4. mock Spring Boot 业务客户端边界，AI 服务不直接操作业务数据库。
-5. 内存版会话记忆，保留最近 8 轮。
-6. 最小 RBAC：普通用户只能查自己，客服可代查并输出审计日志。
-7. 最小内容安全：输入敏感词检查、输出高危承诺检查。
-8. 结构化响应：`answer`、`intent`、`slots`、`sources`、`tool_calls`、`trace_id`、`latency_ms`。
-9. 结构化 JSON 日志和轻量 trace。
-10. 从 `data/knowledge/` 加载 Markdown/TXT，完成清洗、分块、MockEmbedding、向量检索和 sources 引用。
-11. 使用 LangChain LCEL 实现 RAG Answer Chain：`Prompt -> LLM -> StrOutputParser`。
-12. 默认 `MockLLM`，不配置 API Key 也能跑通问答链路。
-13. 可通过 OpenAI-compatible API 接入 `qwen-plus` 或其他兼容模型。
-14. sources 为空时直接兜底转人工，不允许 LLM 编造答案。
+2. 两阶段意图识别 Pipeline：规则预分类 + LLM 结构化 JSON 识别。
+3. 支持 12 类细分意图：`faq_query`、`package_query`、`package_recommend`、`package_change`、`bill_query`、`bill_explain`、`fault_diagnosis`、`network_repair`、`ticket_create`、`ticket_query`、`human_transfer`、`unknown`。
+4. 意图识别结果包含 `intent`、`slots`、`confidence`、`reason`，并进入 trace 日志。
+5. Router 升级为注册式路由表，新增意图只需注册 handler。
+6. 低置信度兜底：`confidence < 0.6` 时返回澄清问题，不调用 RAG 或业务工具。
+7. Router 分发机制：FAQ、账单解释、套餐推荐和故障排查走真实知识库检索；套餐、账单、工单走 mock 业务工具。
+8. mock Spring Boot 业务客户端边界，AI 服务不直接操作业务数据库。
+9. 内存版会话记忆，保留最近 8 轮。
+10. 最小 RBAC：普通用户只能查自己，客服可代查并输出审计日志。
+11. 最小内容安全：输入敏感词检查、输出高危承诺检查。
+12. 结构化响应：`answer`、`intent`、`slots`、`confidence`、`intent_reason`、`sources`、`tool_calls`、`trace_id`、`latency_ms`。
+13. 结构化 JSON 日志和轻量 trace。
+14. 从 `data/knowledge/` 加载 Markdown/TXT，完成清洗、分块、MockEmbedding、向量检索和 sources 引用。
+15. 使用 LangChain LCEL 实现 RAG Answer Chain：`Prompt -> LLM -> StrOutputParser`。
+16. 默认 `MockLLM`，不配置 API Key 也能跑通问答链路。
+17. 可通过 OpenAI-compatible API 接入 `qwen-plus` 或其他兼容模型。
+18. sources 为空时直接兜底转人工，不允许 LLM 编造答案。
 
 ## 架构说明
 
@@ -33,8 +37,10 @@ POST /api/chat
   -> customer_agent.py 主编排
   -> permission.py 权限校验
   -> guard.py 输入安全检查
-  -> intent_classifier.py 意图识别
-  -> router.py 路由分发
+  -> intent_classifier.py 规则预分类
+  -> intent_chain.py LLM 结构化意图识别
+  -> confidence 低置信度兜底
+  -> router.py 注册式路由分发
   -> RAG retriever + LCEL answer chain / tools mock
   -> qwen-plus/OpenAI-compatible LLM 或 MockLLM fallback
   -> guard.py 输出安全检查
@@ -120,6 +126,15 @@ LLM_TEMPERATURE=0
 
 如果 Key 缺失、依赖不可用或真实模型调用异常，系统会 fallback 到 `MockLLM`，保证本地最小版本仍能启动和测试。
 
+意图识别阈值配置：
+
+```bash
+INTENT_RULE_DIRECT_THRESHOLD=0.85
+INTENT_LOW_CONFIDENCE_THRESHOLD=0.6
+```
+
+规则预分类命中高确定性关键词且置信度达到 `INTENT_RULE_DIRECT_THRESHOLD` 时直接返回；低确定性问题进入 LLM 结构化识别。最终 `confidence < INTENT_LOW_CONFIDENCE_THRESHOLD` 时，系统返回澄清问题或转人工建议，不触发工具调用。
+
 真实向量模型配置：
 
 ```bash
@@ -167,7 +182,7 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
   -d "{\"user_id\":\"u1001\",\"session_id\":\"s1\",\"role\":\"user\",\"message\":\"套餐变更什么时候生效？\"}"
 ```
 
-账单规则 FAQ：
+账单解释：
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/chat" ^
@@ -207,16 +222,46 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
   -d "{\"user_id\":\"u1001\",\"session_id\":\"s1\",\"role\":\"user\",\"message\":\"我要创建工单，宽带断网\"}"
 ```
 
-## 6 类意图示例
+套餐推荐：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase4-s1\",\"role\":\"user\",\"message\":\"我流量经常不够，推荐一个适合的套餐\"}"
+```
+
+工单查询：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase4-s2\",\"role\":\"user\",\"message\":\"帮我查工单 TCK-ABC123456 的进度\"}"
+```
+
+低置信度兜底：
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase4-s3\",\"role\":\"user\",\"message\":\"随便看看这个事情\"}"
+```
+
+## 12 类意图示例
 
 | 意图 | 示例问题 | 当前链路 |
 |---|---|---|
 | `faq_query` | 套餐变更什么时候生效？ | 真实知识库检索 |
 | `package_query` | 查询我的当前套餐 | mock 业务工具 |
+| `package_recommend` | 我流量经常不够，推荐一个适合的套餐 | 真实知识库检索 + 保守建议 |
 | `package_change` | 我要办理5G畅享套餐 | mock 业务工具 |
 | `bill_query` | 帮我查本月账单 | mock 业务工具 |
+| `bill_explain` | 账单里为什么会有超量流量费用？ | 真实知识库检索 |
 | `fault_diagnosis` | 宽带不能上网怎么办？ | 真实知识库检索 + 工单建议 |
+| `network_repair` | 我要报修宽带断网 | mock 工单工具 |
 | `ticket_create` | 我要创建工单，宽带断网 | mock 业务工具 |
+| `ticket_query` | 帮我查工单 TCK-ABC123456 的进度 | mock 业务工具 |
+| `human_transfer` | 帮我转人工客服 | 转人工兜底文案 |
+| `unknown` | 随便看看这个事情 | 低置信度澄清 |
 
 ## 第一阶段已实现内容
 
@@ -245,4 +290,29 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 6. sources 为空时不调用 LLM，直接建议转人工客服。
 7. `DashScopeEmbedding` 支持 `text-embedding-v4`，真实 embedding 不可用时 fallback 到 `MockEmbedding`。
 
-后续阶段继续扩展 Redis Cluster、结构化 LLM 意图识别、RocketMQ、BGE Embedding、BGE Reranker、Prometheus。
+## 第四阶段已实现内容
+
+第四阶段把单纯规则分类升级为企业级两阶段意图识别和多场景 Router：
+
+1. 新增 `app/agents/intent_schema.py`，统一维护 12 类 intent、slots 约定和结构化结果。
+2. 新增 `app/agents/chains/intent_chain.py`，使用 LCEL 组织 LLM 结构化意图识别，并强制解析 JSON。
+3. `intent_classifier.py` 支持规则预分类，高置信度直出，低确定性问题交给 LLM；LLM 不可用时 fallback 到规则结果。
+4. `router.py` 改为注册式路由表，避免随着 intent 增长堆叠大量 `if/else`。
+5. 新增 `package_recommend`、`bill_explain`、`network_repair`、`ticket_query`、`human_transfer`、`unknown` 等细分场景。
+6. `confidence < 0.6` 时返回澄清问题，不调用 RAG 或业务工具，降低误路由风险。
+7. `MockLLM` 支持 intent JSON 输出，本地没有 API Key 也能演示结构化识别链路。
+8. pytest 补充分类器、Router、低置信度兜底测试。
+
+## slots 设计
+
+| slot | 含义 |
+|---|---|
+| `month` | 账单月份，例如 `本月`、`上月`、`2026-06` |
+| `target_package` | 用户想办理或咨询的目标套餐 |
+| `issue_type` | 问题类型，例如 `network`、`billing`、`package`、`general` |
+| `ticket_id` | 售后工单号 |
+| `phone_number` | 脱敏手机号 |
+| `product_name` | 用户提到的业务产品 |
+| `target_user_id` | 客服代查或文本中提到的目标用户 |
+
+后续阶段继续扩展 Redis Cluster、真实 Spring Boot HTTP 工具调用、RocketMQ、BGE Embedding、BGE Reranker、Prometheus。

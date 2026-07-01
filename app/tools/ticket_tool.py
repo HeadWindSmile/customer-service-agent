@@ -10,3 +10,5 @@ class TicketTool:
     def create_ticket(self, user_id: str, issue_type: str, description: str) -> dict:
         return self.client.create_ticket(user_id, issue_type, description)
 
+    def query_ticket(self, user_id: str, ticket_id: str) -> dict:
+        return self.client.query_ticket(user_id, ticket_id)

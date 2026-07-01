@@ -9,7 +9,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 3 阶段：LLM + LCEL 生成链路",
+        description="第 4 阶段：意图识别与多场景 Router 升级",
     )
     app.include_router(chat_router)
     return app
