@@ -3,7 +3,7 @@ from langchain_core.runnables import Runnable
 from app.llm.base import BaseLLMClient, LLMRuntimeConfig
 
 
-QWEN_OPENAI_COMPATIBLE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DASHSCOPE_OPENAI_COMPATIBLE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 class OpenAICompatibleLLM(BaseLLMClient):
@@ -36,24 +36,28 @@ class OpenAICompatibleLLM(BaseLLMClient):
         )
 
 
-class QwenLLM(OpenAICompatibleLLM):
-    """qwen-plus 适配器。
+class DashScopeLLM(OpenAICompatibleLLM):
+    """阿里云百炼 DashScope 适配器。
 
-    DashScope 提供 OpenAI-compatible API，本阶段复用 ChatOpenAI 客户端，
-    这样既体现真实模型接入点，又避免引入额外重量级 SDK。
+    DashScope 提供 OpenAI-compatible API，本阶段复用 ChatOpenAI 客户端。
+    这样 qwen-plus、deepseek-v4-flash 等百炼模型都能走同一套调用边界。
     """
 
-    provider = "qwen"
+    provider = "dashscope"
 
     def __init__(self, config: LLMRuntimeConfig) -> None:
         if not config.dashscope_api_key:
-            raise RuntimeError("DASHSCOPE_API_KEY 未配置，无法创建 qwen-plus LLM。")
+            raise RuntimeError("DASHSCOPE_API_KEY 未配置，无法创建 DashScope LLM。")
         qwen_config = LLMRuntimeConfig(
             provider=config.provider,
             model_name=config.model_name or "qwen-plus",
             temperature=config.temperature,
             timeout_seconds=config.timeout_seconds,
             openai_api_key=config.dashscope_api_key,
-            openai_base_url=QWEN_OPENAI_COMPATIBLE_BASE_URL,
+            openai_base_url=config.dashscope_base_url or DASHSCOPE_OPENAI_COMPATIBLE_BASE_URL,
         )
         super().__init__(qwen_config)
+
+
+# 保留旧类名作为兼容入口，避免已配置 LLM_PROVIDER=qwen 的本地环境失效。
+QwenLLM = DashScopeLLM

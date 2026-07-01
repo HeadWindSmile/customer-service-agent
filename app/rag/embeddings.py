@@ -1,6 +1,9 @@
 import hashlib
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
+
+from app.config import settings
 
 
 class BaseEmbedding(ABC):
@@ -35,31 +38,89 @@ class MockEmbedding(BaseEmbedding):
         return [round(value / norm, 6) for value in vector]
 
 
-class DashScopeEmbedding(BaseEmbedding):
-    """通义千问 embedding 预留接口；第 2 阶段默认不调用外部服务。"""
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError("当前阶段默认使用 MockEmbedding，后续阶段再接 DashScope。")
-
-    def embed_query(self, text: str) -> list[float]:
-        raise NotImplementedError("当前阶段默认使用 MockEmbedding，后续阶段再接 DashScope。")
-
-
 class OpenAICompatibleEmbedding(BaseEmbedding):
-    """OpenAI-compatible embedding 预留接口；保持扩展点但不增加运行时依赖。"""
+    """OpenAI-compatible embedding 适配器。
+
+    阿里云百炼和很多企业模型网关都兼容 OpenAI embeddings 接口。RAG 层只依赖
+    BaseEmbedding，可以在 mock、DashScope 和企业私有网关之间切换。
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model_name: str,
+        dimensions: int | None = None,
+        timeout_seconds: float = 10,
+    ) -> None:
+        if not api_key:
+            raise RuntimeError("Embedding API Key 未配置。")
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model_name = model_name
+        self.dimensions = dimensions
+        self.timeout_seconds = timeout_seconds
+        self.fallback = MockEmbedding()
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError("当前阶段默认使用 MockEmbedding，后续阶段再接 OpenAI-compatible API。")
+        if not texts:
+            return []
+        try:
+            return [item for batch in _batched(texts, 10) for item in self._embed_batch(batch)]
+        except Exception:
+            # 外部 embedding 不可用时降级到 mock，保证本地服务仍能启动和演示。
+            return self.fallback.embed_documents(texts)
 
     def embed_query(self, text: str) -> list[float]:
-        raise NotImplementedError("当前阶段默认使用 MockEmbedding，后续阶段再接 OpenAI-compatible API。")
+        vectors = self.embed_documents([text])
+        return vectors[0] if vectors else self.fallback.embed_query(text)
+
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=self.timeout_seconds)
+        kwargs: dict[str, object] = {"model": self.model_name, "input": texts}
+        if self.dimensions:
+            kwargs["dimensions"] = self.dimensions
+        response = client.embeddings.create(**kwargs)
+        return [list(item.embedding) for item in response.data]
+
+
+class DashScopeEmbedding(OpenAICompatibleEmbedding):
+    """阿里云百炼 text-embedding-v4 适配器，默认使用 DashScope 兼容接口。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            api_key=settings.dashscope_api_key,
+            base_url=settings.dashscope_base_url,
+            model_name=settings.embedding_model_name,
+            dimensions=settings.embedding_dimensions,
+            timeout_seconds=settings.embedding_timeout_seconds,
+        )
 
 
 def create_embedding(provider: str) -> BaseEmbedding:
     if provider == "mock":
         return MockEmbedding()
     if provider == "dashscope":
-        return DashScopeEmbedding()
+        try:
+            return DashScopeEmbedding()
+        except Exception:
+            return MockEmbedding()
     if provider == "openai_compatible":
-        return OpenAICompatibleEmbedding()
+        try:
+            return OpenAICompatibleEmbedding(
+                api_key=settings.openai_api_key,
+                base_url=settings.openai_base_url,
+                model_name=settings.embedding_model_name,
+                dimensions=settings.embedding_dimensions,
+                timeout_seconds=settings.embedding_timeout_seconds,
+            )
+        except Exception:
+            return MockEmbedding()
     return MockEmbedding()
+
+
+def _batched(items: list[str], batch_size: int) -> Iterable[list[str]]:
+    for start in range(0, len(items), batch_size):
+        yield items[start : start + batch_size]

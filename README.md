@@ -92,9 +92,19 @@ LLM_PROVIDER=mock
 接入 qwen-plus：
 
 ```bash
-LLM_PROVIDER=qwen
+LLM_PROVIDER=dashscope
 DASHSCOPE_API_KEY=你的 DashScope Key
 LLM_MODEL_NAME=qwen-plus
+LLM_TEMPERATURE=0
+```
+
+接入阿里云百炼上的其他 OpenAI-compatible 模型，例如 deepseek-v4-flash：
+
+```bash
+LLM_PROVIDER=dashscope
+DASHSCOPE_API_KEY=你的 DashScope Key
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL_NAME=deepseek-v4-flash
 LLM_TEMPERATURE=0
 ```
 
@@ -109,6 +119,17 @@ LLM_TEMPERATURE=0
 ```
 
 如果 Key 缺失、依赖不可用或真实模型调用异常，系统会 fallback 到 `MockLLM`，保证本地最小版本仍能启动和测试。
+
+真实向量模型配置：
+
+```bash
+EMBEDDING_PROVIDER=dashscope
+EMBEDDING_MODEL_NAME=text-embedding-v4
+EMBEDDING_DIMENSIONS=768
+EMBEDDING_TIMEOUT_SECONDS=10
+```
+
+`text-embedding-v4` 支持多种向量维度。本项目默认建议使用 768 维，在客服知识库 Demo 中兼顾检索效果和本地索引体积。
 
 ## 当前 RAG 架构
 
@@ -216,11 +237,12 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 
 第三阶段把模板式回答升级为可配置的大模型生成链路：
 
-1. 新增 `app/llm/`，支持 `mock`、`qwen`、`openai_compatible` 三类 provider。
+1. 新增 `app/llm/`，支持 `mock`、`dashscope/qwen`、`openai_compatible` 三类 provider。
 2. 新增 `app/agents/chains/rag_answer_chain.py`，使用 LCEL 管道表达式组织 RAG Answer Chain。
 3. FAQ 和故障排查链路先检索 sources，再生成客服回答。
 4. 默认 `temperature=0`，降低回答随机性。
 5. 真实 LLM 不可用时 fallback 到 `MockLLM`。
 6. sources 为空时不调用 LLM，直接建议转人工客服。
+7. `DashScopeEmbedding` 支持 `text-embedding-v4`，真实 embedding 不可用时 fallback 到 `MockEmbedding`。
 
 后续阶段继续扩展 Redis Cluster、结构化 LLM 意图识别、RocketMQ、BGE Embedding、BGE Reranker、Prometheus。

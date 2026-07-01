@@ -10,6 +10,7 @@ __pycache__/
 .ruff_cache/
 
 data/vector_store/
+data/vector_store_*/
 
 .idea/
 .vscode/

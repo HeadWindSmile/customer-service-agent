@@ -17,6 +17,7 @@ class LLMRuntimeConfig:
     temperature: float
     timeout_seconds: float
     dashscope_api_key: str = ""
+    dashscope_base_url: str = ""
     openai_api_key: str = ""
     openai_base_url: str = ""
 
