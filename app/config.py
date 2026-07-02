@@ -2,6 +2,10 @@ import os
 from dataclasses import dataclass, field
 
 
+def _env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _split_env(name: str, default: str) -> list[str]:
     return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
 
@@ -42,6 +46,8 @@ class Settings:
     intent_low_confidence_threshold: float = float(os.getenv("INTENT_LOW_CONFIDENCE_THRESHOLD", "0.6"))
     business_service_base_url: str = os.getenv("BUSINESS_SERVICE_BASE_URL", "").strip()
     business_service_timeout_ms: int = int(os.getenv("BUSINESS_SERVICE_TIMEOUT_MS", "800"))
+    audit_log_enabled: bool = _env_bool("AUDIT_LOG_ENABLED", "true")
+    audit_log_path: str = os.getenv("AUDIT_LOG_PATH", "logs/audit.log")
     safety_blocked_words: list[str] = field(
         default_factory=lambda: _split_env(
             "SAFETY_BLOCKED_WORDS",

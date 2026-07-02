@@ -6,7 +6,7 @@
 
 ## 当前阶段能力
 
-当前处于第 6 阶段：Redis 会话记忆与多轮上下文。
+当前处于第 7 阶段：RBAC 权限控制与审计日志。
 
 已实现：
 
@@ -21,7 +21,7 @@
 9. AI 服务通过 `BusinessClient` 抽象访问业务能力，支持 `HttpBusinessClient` 和本地 `MockBusinessClient` fallback。
 10. 业务工具调用支持 timeout、业务异常、服务不可用降级，并在 `tool_calls` 中记录 `tool_name`、`input`、`output`、`success`、`latency_ms`、`error_message`。
 11. 会话记忆升级为 `MemoryStore` 抽象，支持 Redis 存储和内存 fallback，按 `user_id + session_id` 隔离。
-12. 最小 RBAC：普通用户只能查自己，客服可代查并输出审计日志。
+12. RBAC 权限体系：支持 `user`、`agent`、`admin` 三类角色，按具体业务动作校验权限。
 13. 最小内容安全：输入敏感词检查、输出高危承诺检查。
 14. 结构化响应：`answer`、`intent`、`slots`、`confidence`、`intent_reason`、`sources`、`tool_calls`、`trace_id`、`latency_ms`。
 15. 结构化 JSON 日志和轻量 trace。
@@ -34,6 +34,8 @@
 22. 支持 `key_facts`，用于保存当前套餐、最近账单月份、最近工单号等安全业务事实。
 23. 支持基础指代消解，响应中返回可选 `rewritten_query`，RAG 检索使用改写后的独立问题。
 24. memory 读写耗时、backend、summary/key_facts 状态进入结构化 trace 日志。
+25. 客服代查、账单查询、套餐变更、工单操作会写入结构化审计日志 `logs/audit.log`。
+26. `tool_calls` 返回 `permission`、`permission_checked`、`audit_logged`，方便演示权限与审计链路。
 
 ## 架构说明
 
@@ -41,17 +43,19 @@
 POST /api/chat
   -> api/chat.py 参数校验
   -> customer_agent.py 主编排
-  -> permission.py 权限校验
+  -> auth/rbac.py 构造 AuthContext 与权限校验
   -> guard.py 输入安全检查
   -> intent_classifier.py 规则预分类
   -> intent_chain.py LLM 结构化意图识别
   -> confidence 低置信度兜底
   -> router.py 注册式路由分发
+  -> 工具调用前按 Permission 做 RBAC 校验
   -> RAG retriever + LCEL answer chain / business tools
   -> BusinessClient
   -> mock_business_service 内部 HTTP API（模拟 Spring Boot）
   -> qwen-plus/OpenAI-compatible LLM 或 MockLLM fallback
   -> guard.py 输出安全检查
+  -> audit_logger.py 写入审计日志
   -> tracing.py + logger.py 记录 trace
   -> 返回结构化结果
 ```
@@ -155,6 +159,15 @@ BUSINESS_SERVICE_BASE_URL=http://127.0.0.1:8010
 BUSINESS_SERVICE_TIMEOUT_MS=800
 ```
 
+审计日志配置：
+
+```bash
+AUDIT_LOG_ENABLED=true
+AUDIT_LOG_PATH=logs/audit.log
+```
+
+默认会把敏感业务操作写入本地 JSON Lines 文件。该文件用于第 7 阶段演示审计链路，不依赖数据库或 RocketMQ。
+
 ## Redis 会话记忆与多轮上下文
 
 第 6 阶段把原来的进程内最近 8 轮记忆升级为统一 `MemoryStore` 抽象：
@@ -196,6 +209,81 @@ MEMORY_BACKEND=memory
 REDIS_URL=redis://localhost:6379/0
 MEMORY_TTL_SECONDS=604800
 MEMORY_RECENT_TURNS=8
+```
+
+## RBAC 权限控制与审计日志
+
+第 7 阶段把最小 role 判断升级为 `Role + Permission + AuthContext` 的 RBAC 模型：
+
+```text
+CustomerAgent
+  -> IntentClassifier 抽取 intent / slots / target_user_id
+  -> PermissionChecker 构造 AuthContext
+  -> Router 声明每个工具动作需要的 Permission
+  -> 工具调用前统一校验权限
+  -> AuditLogger 写入 logs/audit.log
+```
+
+角色边界：
+
+| 角色 | 边界 |
+|---|---|
+| `user` | 只能访问自己的套餐、账单、工单和套餐变更；`target_user_id` 为空或等于 `user_id`。 |
+| `agent` | 可以代用户查询套餐、账单、工单和创建工单，但业务数据操作必须显式提供 `target_user_id`，并记录审计日志。 |
+| `admin` | 拥有全部权限，用于演示高权限后台角色；敏感操作仍会审计。 |
+
+业务动作与权限：
+
+| 场景 | 普通用户权限 | 客服/管理员代办权限 |
+|---|---|---|
+| FAQ / 政策咨询 | `FAQ_QUERY` | `FAQ_QUERY` |
+| 套餐查询 | `PACKAGE_QUERY_SELF` | `PACKAGE_QUERY_AGENT` |
+| 账单查询 | `BILL_QUERY_SELF` | `BILL_QUERY_AGENT` |
+| 套餐变更 | `PACKAGE_CHANGE_SELF` | `PACKAGE_CHANGE_AGENT` |
+| 工单创建 | `TICKET_CREATE_SELF` | `TICKET_CREATE_AGENT` |
+| 工单查询 | `TICKET_QUERY_SELF` | `TICKET_QUERY_AGENT` |
+
+当前默认策略中，`agent` 可代查和代建工单，但不默认拥有 `PACKAGE_CHANGE_AGENT`，套餐代变更保留给 `admin`。这样可以体现“权限不是简单 role 判断”，而是按具体业务动作分级控制。
+
+审计日志字段包括：
+
+```text
+trace_id、timestamp、role、actor_user_id_masked、target_user_id_masked、
+action、permission、intent、tool_name、resource_type、allowed、success、reason、metadata
+```
+
+审计日志会脱敏用户标识、手机号、身份证号、银行卡号、邮箱等字段；第一版同步写本地 `logs/audit.log`，后续第 9 阶段再扩展为 RocketMQ 异步事件。
+
+普通用户查自己：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"rbac-self\",\"role\":\"user\",\"message\":\"查询我的当前套餐\"}"
+```
+
+普通用户越权查别人，会返回权限不足：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"rbac-forbidden\",\"role\":\"user\",\"target_user_id\":\"u1002\",\"message\":\"帮我查本月账单\"}"
+```
+
+客服代查账单，会写入审计日志：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"agent001\",\"session_id\":\"rbac-agent-bill\",\"role\":\"agent\",\"target_user_id\":\"u1002\",\"message\":\"帮客户查本月账单\"}"
+```
+
+客服代创建工单，会写入审计日志：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"agent001\",\"session_id\":\"rbac-agent-ticket\",\"role\":\"agent\",\"target_user_id\":\"u1002\",\"message\":\"帮客户创建宽带断网工单\"}"
 ```
 
 ## 知识库入库
@@ -525,6 +613,23 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 8. memory 读写耗时进入 trace 日志。
 9. docker compose 新增 Redis 服务。
 10. pytest 补充 memory、Redis、query rewrite 和多轮 chat 测试。
+
+## 第七阶段已实现内容
+
+第七阶段把简单 role 判断升级为 RBAC 权限控制与审计日志：
+
+1. 新增 `app/auth/rbac.py`，定义 `Role`、`Permission`、`PermissionChecker` 和 `ForbiddenError`。
+2. 新增 `app/auth/context.py`，用 `AuthContext` 统一表达当前登录用户、目标用户、角色和权限集合。
+3. `ChatRequest.role` 支持 `user`、`agent`、`admin`。
+4. `ToolCall` 增加 `permission`、`permission_checked`、`audit_logged`。
+5. 普通用户只能访问自己，`target_user_id` 为空或等于 `user_id`。
+6. 客服代查或代建工单必须显式提供 `target_user_id`。
+7. `admin` 拥有全部权限，用于演示高权限后台角色。
+8. Router 在每次业务工具调用前统一检查权限，tools 层仍只负责业务系统能力调用。
+9. 新增 `app/audit/audit_logger.py`，将敏感操作写入 `logs/audit.log`。
+10. 审计日志对用户标识、手机号、身份证、银行卡、邮箱等字段做脱敏。
+11. trace 日志记录 `auth_role`、脱敏后的当前用户/目标用户、权限集合、`rbac_allowed` 和 tool_calls 中的权限结果。
+12. pytest 补充普通用户自查、客服代查、越权拒绝和审计日志脱敏测试。
 
 ## slots 设计
 

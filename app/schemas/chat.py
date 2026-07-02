@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     user_id: str = Field(..., min_length=1, description="当前调用方用户 ID")
     session_id: str = Field(..., min_length=1, description="会话 ID")
-    role: Literal["user", "agent"] = Field(..., description="调用方角色")
+    role: Literal["user", "agent", "admin"] = Field(..., description="调用方角色")
     message: str = Field(..., min_length=1, description="用户输入")
     target_user_id: str | None = Field(
         default=None,
@@ -29,6 +29,9 @@ class ToolCall(BaseModel):
     success: bool
     latency_ms: float
     error_message: str | None = None
+    permission: str | None = None
+    permission_checked: bool = False
+    audit_logged: bool = False
 
 
 class IntentResult(BaseModel):

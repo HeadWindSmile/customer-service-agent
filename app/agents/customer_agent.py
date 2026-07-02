@@ -2,7 +2,7 @@ from app.agents.intent_classifier import IntentClassifier
 from app.agents.prompts import LOW_CONFIDENCE_ANSWER
 from app.agents.query_rewriter import QueryRewriter
 from app.agents.router import CustomerRouter
-from app.auth.permission import PermissionChecker, PermissionDenied
+from app.auth.rbac import ForbiddenError, PermissionChecker
 from app.config import settings
 from app.memory.factory import create_memory_store
 from app.memory.manager import ConversationMemoryManager
@@ -58,11 +58,9 @@ class CustomerAgent:
             confidence = intent_result.confidence
             intent_reason = intent_result.reason
 
-            # 权限检查
-            target_user_id = self.permission_checker.resolve_target_user_id(request, slots)
-            audit_event = self.permission_checker.check(request, target_user_id)
-            if audit_event:
-                log_event("audit.agent_access", audit_event)
+            auth_context = self.permission_checker.build_context(request, slots)
+            for key, value in auth_context.to_trace_attributes().items():
+                trace.add_attribute(key, value)
 
             if confidence < settings.intent_low_confidence_threshold:
                 trace.add_attribute("intent", intent)
@@ -88,11 +86,13 @@ class CustomerAgent:
             route_result = await self.router.route(
                 intent_result,
                 rewritten_query,
-                target_user_id,
+                auth_context.effective_user_id,
                 recent_turns=memory_context.recent_turns,
                 memory_summary=memory_context.summary,
                 key_facts=memory_context.key_facts,
                 rewritten_query=rewritten_query,
+                auth_context=auth_context,
+                trace_id=trace.trace_id,
             )
             self.safety_guard.check_output(route_result.answer)
 
@@ -114,6 +114,7 @@ class CustomerAgent:
             trace.add_attribute("intent_reason", intent_reason)
             trace.add_attribute("tool_calls", [call.model_dump() for call in route_result.tool_calls])
             trace.add_attribute("retrieved_sources", [source.model_dump() for source in route_result.sources])
+            trace.add_attribute("rbac_allowed", True)
             log_event("chat.completed", trace.to_log_payload())
 
             return ChatResponse(
@@ -128,8 +129,9 @@ class CustomerAgent:
                 latency_ms=trace.latency_ms,
                 rewritten_query=route_result.rewritten_query or rewritten_query,
             )
-        except (SafetyViolation, PermissionDenied) as exc:
+        except (SafetyViolation, ForbiddenError) as exc:
             trace.add_attribute("error", str(exc))
+            trace.add_attribute("rbac_allowed", False)
             log_event("chat.blocked", trace.to_log_payload())
             return ChatResponse(
                 answer=str(exc),

@@ -11,6 +11,7 @@ __pycache__/
 
 data/vector_store/
 data/vector_store_*/
+logs/
 
 .idea/
 .vscode/

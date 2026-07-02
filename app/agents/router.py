@@ -5,6 +5,9 @@ from typing import Any
 from app.agents.chains.rag_answer_chain import RagAnswerChain
 from app.agents.intent_schema import IntentName
 from app.agents.prompts import NO_SOURCE_ANSWER
+from app.audit import AuditLogger
+from app.auth.context import AuthContext
+from app.auth.rbac import ForbiddenError, Permission, PermissionChecker
 from app.rag.retriever import KnowledgeRetriever
 from app.schemas.chat import IntentResult, Source, ToolCall
 from app.tools.bill_tool import BillTool
@@ -33,8 +36,15 @@ class CustomerRouter:
     handler 和注册项”，避免主分发逻辑随着业务场景增长变成一长串条件判断。
     """
 
-    def __init__(self, business_client: BusinessClient | None = None) -> None:
+    def __init__(
+        self,
+        business_client: BusinessClient | None = None,
+        permission_checker: PermissionChecker | None = None,
+        audit_logger: AuditLogger | None = None,
+    ) -> None:
         business_client = business_client or create_business_client()
+        self.permission_checker = permission_checker or PermissionChecker()
+        self.audit_logger = audit_logger or AuditLogger()
         self.retriever = KnowledgeRetriever()
         self.rag_answer_chain = RagAnswerChain()
         self.package_tool = PackageTool(business_client)
@@ -65,16 +75,22 @@ class CustomerRouter:
         memory_summary: str = "",
         key_facts: dict[str, Any] | None = None,
         rewritten_query: str | None = None,
+        auth_context: AuthContext | None = None,
+        trace_id: str = "",
     ) -> RouteResult:
+        auth_context = auth_context or self.permission_checker.build_self_context(user_id)
+        effective_user_id = auth_context.effective_user_id
         handler = self.routes.get(intent_result.intent, self._handle_unknown)
         return await handler(
             intent_result,
             message,
-            user_id,
+            effective_user_id,
             recent_turns or [],
             memory_summary,
             key_facts or {},
             rewritten_query or message,
+            auth_context,
+            trace_id,
         )
 
     async def _handle_faq(
@@ -86,6 +102,8 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         return self._answer_with_rag(
             message,
@@ -105,11 +123,24 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.PACKAGE_QUERY_SELF,
+            Permission.PACKAGE_QUERY_AGENT,
+        )
         output, call = await self._call_tool(
             "query_user_package",
             {"user_id": user_id},
             lambda: self.package_tool.query_user_package(user_id),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="package_query",
+            resource_type="package",
         )
         if not call.success:
             return RouteResult(answer="套餐查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
@@ -125,6 +156,8 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         result = self._answer_with_rag(
             message,
@@ -150,12 +183,26 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         target_package = str(intent_result.slots.get("target_package", "5G畅享套餐"))
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.PACKAGE_CHANGE_SELF,
+            Permission.PACKAGE_CHANGE_AGENT,
+        )
         output, call = await self._call_tool(
             "change_package",
             {"user_id": user_id, "target_package": target_package},
             lambda: self.package_tool.change_package(user_id, target_package),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="package_change",
+            resource_type="package",
+            audit_metadata={"target_package": target_package},
         )
         if not call.success:
             return RouteResult(answer="套餐办理失败，请稍后再试或转人工客服。", tool_calls=[call], rewritten_query=rewritten_query)
@@ -171,12 +218,26 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         month = str(intent_result.slots.get("month", "本月"))
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.BILL_QUERY_SELF,
+            Permission.BILL_QUERY_AGENT,
+        )
         output, call = await self._call_tool(
             "query_bill",
             {"user_id": user_id, "month": month},
             lambda: self.bill_tool.query_bill(user_id, month),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="bill_query",
+            resource_type="bill",
+            audit_metadata={"month": month},
         )
         if not call.success:
             return RouteResult(answer="账单查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
@@ -195,6 +256,8 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         return self._answer_with_rag(
             message,
@@ -214,6 +277,8 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         return self._answer_with_rag(
             message,
@@ -234,12 +299,26 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         slots = {**intent_result.slots, "issue_type": "network"}
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.TICKET_CREATE_SELF,
+            Permission.TICKET_CREATE_AGENT,
+        )
         output, call = await self._call_tool(
             "create_ticket",
             {"user_id": user_id, "issue_type": "network", "description": message},
             lambda: self.ticket_tool.create_ticket(user_id, "network", message),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="ticket_create",
+            resource_type="ticket",
+            audit_metadata={"issue_type": "network"},
         )
         if not call.success:
             return RouteResult(answer="网络报修提交失败，请稍后再试或转人工客服。", tool_calls=[call], rewritten_query=rewritten_query)
@@ -256,12 +335,26 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         issue_type = str(intent_result.slots.get("issue_type", "general"))
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.TICKET_CREATE_SELF,
+            Permission.TICKET_CREATE_AGENT,
+        )
         output, call = await self._call_tool(
             "create_ticket",
             {"user_id": user_id, "issue_type": issue_type, "description": message},
             lambda: self.ticket_tool.create_ticket(user_id, issue_type, message),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="ticket_create",
+            resource_type="ticket",
+            audit_metadata={"issue_type": issue_type},
         )
         if not call.success:
             return RouteResult(answer="工单创建失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
@@ -277,14 +370,28 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         ticket_id = str(intent_result.slots.get("ticket_id", "")).strip()
         if not ticket_id:
             return RouteResult(answer="请提供需要查询的工单号，我再帮你查看处理进度。", rewritten_query=rewritten_query)
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.TICKET_QUERY_SELF,
+            Permission.TICKET_QUERY_AGENT,
+        )
         output, call = await self._call_tool(
             "query_ticket",
             {"user_id": user_id, "ticket_id": ticket_id},
             lambda: self.ticket_tool.query_ticket(user_id, ticket_id),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="ticket_query",
+            resource_type="ticket",
+            audit_metadata={"ticket_id": ticket_id},
         )
         if not call.success:
             return RouteResult(answer="工单查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
@@ -300,6 +407,8 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         return RouteResult(answer="我会为你转接人工客服，请稍候。", rewritten_query=rewritten_query)
 
@@ -312,6 +421,8 @@ class CustomerRouter:
         memory_summary: str,
         key_facts: dict[str, Any],
         rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
     ) -> RouteResult:
         return RouteResult(
             answer="我还不能确定你的具体诉求。你可以补充说明是要查套餐、查账单、排查故障还是创建工单。",
@@ -347,37 +458,85 @@ class CustomerRouter:
         tool_name: str,
         input_data: dict[str, Any],
         func: Callable[[], Awaitable[dict[str, Any]]],
+        *,
+        auth_context: AuthContext | None = None,
+        trace_id: str = "",
+        intent: str = "",
+        required_permission: Permission | None = None,
+        audit_action: str = "",
+        resource_type: str = "business",
+        audit_metadata: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], ToolCall]:
         started = elapsed_ms()
+        permission_checked = False
+        permission_value = required_permission.value if required_permission else None
+
+        if auth_context and required_permission:
+            try:
+                self.permission_checker.require(auth_context, required_permission)
+                permission_checked = True
+            except ForbiddenError as exc:
+                self.audit_logger.log_tool_action(
+                    trace_id=trace_id,
+                    auth_context=auth_context,
+                    action=audit_action or tool_name,
+                    permission=required_permission.value,
+                    intent=intent,
+                    tool_name=tool_name,
+                    resource_type=resource_type,
+                    allowed=False,
+                    success=False,
+                    reason=str(exc),
+                    metadata=audit_metadata or {},
+                )
+                raise
+
         try:
             output = await func()
-            call = ToolCall(
-                tool_name=tool_name,
-                input=input_data,
-                output=output,
-                success=True,
-                latency_ms=elapsed_ms() - started,
-            )
-            return output, call
+            success = True
+            error_message = None
         except BusinessClientError as exc:
             output = exc.to_output()
-            call = ToolCall(
-                tool_name=tool_name,
-                input=input_data,
-                output=output,
-                success=False,
-                latency_ms=elapsed_ms() - started,
-                error_message=exc.message,
-            )
-            return output, call
+            success = False
+            error_message = exc.message
         except Exception as exc:
             output = {"error_code": "TOOL_CALL_FAILED", "message": str(exc)}
-            call = ToolCall(
+            success = False
+            error_message = str(exc)
+
+        audit_logged = False
+        if auth_context and required_permission and self.permission_checker.should_audit(auth_context, required_permission):
+            audit_logged = self.audit_logger.log_tool_action(
+                trace_id=trace_id,
+                auth_context=auth_context,
+                action=audit_action or tool_name,
+                permission=required_permission.value,
+                intent=intent,
                 tool_name=tool_name,
-                input=input_data,
-                output=output,
-                success=False,
-                latency_ms=elapsed_ms() - started,
-                error_message=str(exc),
+                resource_type=resource_type,
+                allowed=True,
+                success=success,
+                reason=error_message or "",
+                metadata={**(audit_metadata or {}), **_audit_metadata_from_output(output)},
             )
-            return output, call
+
+        call = ToolCall(
+            tool_name=tool_name,
+            input=input_data,
+            output=output,
+            success=success,
+            latency_ms=elapsed_ms() - started,
+            error_message=error_message,
+            permission=permission_value,
+            permission_checked=permission_checked,
+            audit_logged=audit_logged,
+        )
+        return output, call
+
+
+def _audit_metadata_from_output(output: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for key in ("status", "order_id", "ticket_id", "issue_type", "month", "target_package", "error_code"):
+        if output.get(key) is not None:
+            metadata[key] = output[key]
+    return metadata
