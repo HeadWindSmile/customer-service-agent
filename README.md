@@ -6,7 +6,7 @@
 
 ## 当前阶段能力
 
-当前处于第 4 阶段：意图识别与多场景 Router 升级。
+当前处于第 5 阶段：业务工具调用与 Spring Boot 边界。
 
 已实现：
 
@@ -16,18 +16,20 @@
 4. 意图识别结果包含 `intent`、`slots`、`confidence`、`reason`，并进入 trace 日志。
 5. Router 升级为注册式路由表，新增意图只需注册 handler。
 6. 低置信度兜底：`confidence < 0.6` 时返回澄清问题，不调用 RAG 或业务工具。
-7. Router 分发机制：FAQ、账单解释、套餐推荐和故障排查走真实知识库检索；套餐、账单、工单走 mock 业务工具。
-8. mock Spring Boot 业务客户端边界，AI 服务不直接操作业务数据库。
-9. 内存版会话记忆，保留最近 8 轮。
-10. 最小 RBAC：普通用户只能查自己，客服可代查并输出审计日志。
-11. 最小内容安全：输入敏感词检查、输出高危承诺检查。
-12. 结构化响应：`answer`、`intent`、`slots`、`confidence`、`intent_reason`、`sources`、`tool_calls`、`trace_id`、`latency_ms`。
-13. 结构化 JSON 日志和轻量 trace。
-14. 从 `data/knowledge/` 加载 Markdown/TXT，完成清洗、分块、MockEmbedding、向量检索和 sources 引用。
-15. 使用 LangChain LCEL 实现 RAG Answer Chain：`Prompt -> LLM -> StrOutputParser`。
-16. 默认 `MockLLM`，不配置 API Key 也能跑通问答链路。
-17. 可通过 OpenAI-compatible API 接入 `qwen-plus` 或其他兼容模型。
-18. sources 为空时直接兜底转人工，不允许 LLM 编造答案。
+7. Router 分发机制：FAQ、账单解释、套餐推荐和故障排查走真实知识库检索；套餐、账单、工单走业务工具。
+8. 新增独立 `mock_business_service/`，用 FastAPI 模拟原有 Spring Boot 业务系统内部 HTTP API。
+9. AI 服务通过 `BusinessClient` 抽象访问业务能力，支持 `HttpBusinessClient` 和本地 `MockBusinessClient` fallback。
+10. 业务工具调用支持 timeout、业务异常、服务不可用降级，并在 `tool_calls` 中记录 `tool_name`、`input`、`output`、`success`、`latency_ms`、`error_message`。
+11. 内存版会话记忆，保留最近 8 轮。
+12. 最小 RBAC：普通用户只能查自己，客服可代查并输出审计日志。
+13. 最小内容安全：输入敏感词检查、输出高危承诺检查。
+14. 结构化响应：`answer`、`intent`、`slots`、`confidence`、`intent_reason`、`sources`、`tool_calls`、`trace_id`、`latency_ms`。
+15. 结构化 JSON 日志和轻量 trace。
+16. 从 `data/knowledge/` 加载 Markdown/TXT，完成清洗、分块、MockEmbedding、向量检索和 sources 引用。
+17. 使用 LangChain LCEL 实现 RAG Answer Chain：`Prompt -> LLM -> StrOutputParser`。
+18. 默认 `MockLLM`，不配置 API Key 也能跑通问答链路。
+19. 可通过 OpenAI-compatible API 接入 `qwen-plus` 或其他兼容模型。
+20. sources 为空时直接兜底转人工，不允许 LLM 编造答案。
 
 ## 架构说明
 
@@ -41,7 +43,9 @@ POST /api/chat
   -> intent_chain.py LLM 结构化意图识别
   -> confidence 低置信度兜底
   -> router.py 注册式路由分发
-  -> RAG retriever + LCEL answer chain / tools mock
+  -> RAG retriever + LCEL answer chain / business tools
+  -> BusinessClient
+  -> mock_business_service 内部 HTTP API（模拟 Spring Boot）
   -> qwen-plus/OpenAI-compatible LLM 或 MockLLM fallback
   -> guard.py 输出安全检查
   -> tracing.py + logger.py 记录 trace
@@ -50,9 +54,32 @@ POST /api/chat
 
 ## 启动方式
 
+最小本地模式只启动 AI 服务。此时 `BUSINESS_SERVICE_BASE_URL` 为空，业务工具会使用本地 `MockBusinessClient` fallback：
+
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
+
+第 5 阶段推荐启动两个服务，模拟“Python/FastAPI AI 服务 + Java/Spring Boot 业务系统”：
+
+```bash
+uvicorn mock_business_service.main:app --host 127.0.0.1 --port 8010
+```
+
+另开一个终端：
+
+```bash
+$env:BUSINESS_SERVICE_BASE_URL="http://127.0.0.1:8010"
+$env:BUSINESS_SERVICE_TIMEOUT_MS="800"
+uvicorn app.main:app --reload
+```
+
+Docker Compose 启动：
+
+```bash
+docker compose up -d
+docker compose ps
 ```
 
 接口文档：
@@ -61,10 +88,53 @@ uvicorn app.main:app --reload
 http://127.0.0.1:8000/docs
 ```
 
+mock 业务服务文档：
+
+```text
+http://127.0.0.1:8010/docs
+```
+
 ## 测试方式
 
 ```bash
 pytest
+```
+
+## AI 服务与业务系统边界
+
+本项目模拟企业里常见的“原有 Spring Boot 主业务系统 + 新增 Python AI 服务层”架构。用户、套餐、账单、工单属于主业务系统的数据和事务边界，AI 服务不直接查业务库，也不直接写业务表。
+
+这样设计有三个原因：
+
+1. 权限、审计、事务一致性仍由主业务系统负责。
+2. AI 服务只编排问答和工具调用，避免绕过已有业务规则。
+3. 未来从 mock 服务替换为真实 Spring Boot 服务时，只需要替换 `BUSINESS_SERVICE_BASE_URL` 和内部接口实现。
+
+业务工具调用链路：
+
+```text
+Router
+  -> PackageTool / BillTool / TicketTool / UserTool
+  -> BusinessClient 抽象
+  -> HttpBusinessClient
+  -> mock_business_service /internal/* API
+```
+
+本地 fallback 链路：
+
+```text
+Router
+  -> tools
+  -> MockBusinessClient
+```
+
+当 `BUSINESS_SERVICE_BASE_URL` 为空时走 fallback；当配置该变量时，AI 服务通过 `httpx.AsyncClient` 调用业务服务。HTTP 超时、连接失败、4xx/5xx 业务错误都会被记录到 `tool_calls`，主链路返回友好失败文案，不会让接口崩溃。
+
+业务服务配置：
+
+```bash
+BUSINESS_SERVICE_BASE_URL=http://127.0.0.1:8010
+BUSINESS_SERVICE_TIMEOUT_MS=800
 ```
 
 ## 知识库入库
@@ -173,6 +243,32 @@ retrieved_sources + user_question + conversation_context
 Prompt 中强约束：只能基于检索资料回答，不得编造资费、赔偿或办理承诺；如果资料不足，必须说明无法确认并建议转人工客服。代码层也会在 `sources` 为空时直接返回兜底文案，不进入 LLM。
 
 ## curl 示例
+
+第 5 阶段业务工具调用示例：
+
+套餐查询：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase5-s1\",\"role\":\"user\",\"message\":\"查询我的当前套餐\"}"
+```
+
+账单查询：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase5-s2\",\"role\":\"user\",\"message\":\"帮我查本月账单\"}"
+```
+
+工单创建：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase5-s3\",\"role\":\"user\",\"message\":\"我要创建工单，宽带断网\"}"
+```
 
 FAQ 查询：
 
@@ -303,6 +399,19 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 7. `MockLLM` 支持 intent JSON 输出，本地没有 API Key 也能演示结构化识别链路。
 8. pytest 补充分类器、Router、低置信度兜底测试。
 
+## 第五阶段已实现内容
+
+第五阶段把本地 mock 工具升级为模拟真实业务微服务调用：
+
+1. 新增 `mock_business_service/`，用 FastAPI 模拟 Spring Boot 内部业务服务。
+2. 业务服务提供用户、套餐、账单、套餐变更、工单创建和工单查询接口。
+3. `app/tools/business_client.py` 新增 `BusinessClient` 抽象、`HttpBusinessClient` 和 `MockBusinessClient` fallback。
+4. `PackageTool`、`BillTool`、`TicketTool`、`UserTool` 只通过 `BusinessClient` 访问业务能力。
+5. `/api/chat` 业务场景通过 HTTP client 调用业务服务，不直接访问 mock 数据。
+6. 工具调用失败时返回友好文案，`tool_calls` 记录 `success=false`、`output`、`latency_ms` 和 `error_message`。
+7. `docker-compose.yml` 同时启动 `ai-service` 和 `mock-business-service`，两者通过服务名通信。
+8. pytest 补充业务 client、tools HTTP 边界和 chat 业务主链路测试。
+
 ## slots 设计
 
 | slot | 含义 |
@@ -315,4 +424,4 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 | `product_name` | 用户提到的业务产品 |
 | `target_user_id` | 客服代查或文本中提到的目标用户 |
 
-后续阶段继续扩展 Redis Cluster、真实 Spring Boot HTTP 工具调用、RocketMQ、BGE Embedding、BGE Reranker、Prometheus。
+后续阶段继续扩展 Redis Cluster、RocketMQ、BGE Embedding、BGE Reranker、Prometheus。

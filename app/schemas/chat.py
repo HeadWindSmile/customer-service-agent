@@ -28,6 +28,7 @@ class ToolCall(BaseModel):
     output: dict[str, Any]
     success: bool
     latency_ms: float
+    error_message: str | None = None
 
 
 class IntentResult(BaseModel):

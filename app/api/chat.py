@@ -9,7 +9,6 @@ agent = CustomerAgent()
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest) -> ChatResponse:
     """API 层保持薄封装，核心流程统一交给 CustomerAgent 编排。"""
-    return agent.handle(request)
-
+    return await agent.handle(request)

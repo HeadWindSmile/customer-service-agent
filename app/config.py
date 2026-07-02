@@ -36,6 +36,8 @@ class Settings:
     llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "10"))
     intent_rule_direct_threshold: float = float(os.getenv("INTENT_RULE_DIRECT_THRESHOLD", "0.85"))
     intent_low_confidence_threshold: float = float(os.getenv("INTENT_LOW_CONFIDENCE_THRESHOLD", "0.6"))
+    business_service_base_url: str = os.getenv("BUSINESS_SERVICE_BASE_URL", "").strip()
+    business_service_timeout_ms: int = int(os.getenv("BUSINESS_SERVICE_TIMEOUT_MS", "800"))
     safety_blocked_words: list[str] = field(
         default_factory=lambda: _split_env(
             "SAFETY_BLOCKED_WORDS",

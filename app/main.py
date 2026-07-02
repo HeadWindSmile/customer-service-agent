@@ -9,7 +9,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 4 阶段：意图识别与多场景 Router 升级",
+        description="第 5 阶段：业务工具调用与 Spring Boot 边界",
     )
     app.include_router(chat_router)
     return app

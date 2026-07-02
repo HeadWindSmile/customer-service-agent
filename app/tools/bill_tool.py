@@ -1,12 +1,13 @@
-from app.tools.business_client import MockBusinessClient
+from typing import Any
+
+from app.tools.business_client import BusinessClient
 
 
 class BillTool:
     """账单工具模拟内部账务服务接口，后续可替换为 HTTP client。"""
 
-    def __init__(self, client: MockBusinessClient) -> None:
+    def __init__(self, client: BusinessClient) -> None:
         self.client = client
 
-    def query_bill(self, user_id: str, month: str) -> dict:
-        return self.client.query_bill(user_id, month)
-
+    async def query_bill(self, user_id: str, month: str) -> dict[str, Any]:
+        return await self.client.query_bill(user_id, month)

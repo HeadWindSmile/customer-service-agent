@@ -4,9 +4,24 @@ services:
     working_dir: /app
     volumes:
       - .:/app
+    environment:
+      BUSINESS_SERVICE_BASE_URL: http://mock-business-service:8010
+      BUSINESS_SERVICE_TIMEOUT_MS: 800
     ports:
       - "8000:8000"
+    depends_on:
+      - mock-business-service
     command: >
       sh -c "pip install -r requirements.txt
       && uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
+  mock-business-service:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "8010:8010"
+    command: >
+      sh -c "pip install -r requirements.txt
+      && uvicorn mock_business_service.main:app --host 0.0.0.0 --port 8010"

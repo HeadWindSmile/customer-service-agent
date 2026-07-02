@@ -20,7 +20,7 @@ class CustomerAgent:
         self.safety_guard = SafetyGuard()
         self.permission_checker = PermissionChecker()
 
-    def handle(self, request: ChatRequest) -> ChatResponse:
+    async def handle(self, request: ChatRequest) -> ChatResponse:
         trace = TraceContext.new()
         intent = "unknown"
         slots: dict[str, object] = {}
@@ -64,7 +64,7 @@ class CustomerAgent:
             trace.add_attribute("memory_turn_count", len(recent_turns))
 
             # 路由
-            route_result = self.router.route(
+            route_result = await self.router.route(
                 intent_result,
                 request.message,
                 target_user_id,
