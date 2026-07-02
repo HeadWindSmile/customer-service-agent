@@ -161,7 +161,7 @@ class IntentClassifier:
     def _is_ticket_query(self, text: str) -> bool:
         if not self._contains(text, ["工单", "TCK-", "报修单"]):
             return False
-        return self._contains(text, ["查询", "查", "进度", "状态", "到哪", "处理到"])
+        return self._contains(text, ["查询", "查", "进度", "状态", "到哪", "处理到", "怎么样"])
 
     def _is_network_repair(self, text: str) -> bool:
         return self._contains(text, ["报修", "上门维修", "网络修复", "宽带维修"]) and self._contains(
@@ -198,7 +198,10 @@ class IntentClassifier:
     def _is_package_faq(self, text: str) -> bool:
         if not self._contains(text, ["套餐", "5G畅享", "家庭融合", "校园套餐", "基础套餐"]):
             return False
-        return self._contains(text, ["规则", "政策", "说明", "介绍", "是什么", "什么时候", "怎么收费", "生效"])
+        return self._contains(
+            text,
+            ["规则", "政策", "说明", "介绍", "是什么", "什么时候", "怎么收费", "多少钱", "能退", "退订", "生效"],
+        )
 
     def _is_bill_query(self, text: str) -> bool:
         if self._is_bill_explain(text):

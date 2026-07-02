@@ -49,3 +49,4 @@ class ChatResponse(BaseModel):
     trace_id: str
     latency_ms: float
     error: str | None = None
+    rewritten_query: str | None = None

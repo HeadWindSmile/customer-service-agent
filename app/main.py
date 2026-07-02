@@ -9,7 +9,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 5 阶段：业务工具调用与 Spring Boot 边界",
+        description="第 6 阶段：Redis 会话记忆与多轮上下文",
     )
     app.include_router(chat_router)
     return app

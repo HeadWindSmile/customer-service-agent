@@ -23,6 +23,8 @@ class MockLLM(BaseLLMClient):
 
     def invoke(self, prompt_input: Any) -> str:
         prompt_text = _prompt_to_text(prompt_input)
+        if "CONVERSATION_SUMMARY" in prompt_text:
+            return _mock_conversation_summary(prompt_text)
         if "INTENT_CLASSIFICATION_JSON" in prompt_text:
             return _mock_intent_json(prompt_text)
 
@@ -101,6 +103,23 @@ def _sanitize_forbidden_phrases(text: str) -> str:
         if phrase:
             sanitized = sanitized.replace(phrase, "未经确认的服务承诺")
     return sanitized
+
+
+def _mock_conversation_summary(prompt_text: str) -> str:
+    """为 summary buffer 提供稳定输出，避免测试依赖真实 LLM。"""
+
+    existing = _extract_block(prompt_text, "已有摘要：", "新增历史：").strip()
+    history = _extract_block(prompt_text, "新增历史：", "输出新的摘要：").strip()
+    parts: list[str] = []
+    if existing and existing != "无":
+        parts.append(existing)
+    if history:
+        cleaned = re.sub(r"\s+", " ", history)
+        parts.append(f"早期对话摘要：{cleaned}")
+    summary = "；".join(parts).strip("；")
+    if len(summary) > 500:
+        return f"{summary[:500]}..."
+    return summary or "无"
 
 
 def _mock_intent_json(prompt_text: str) -> str:

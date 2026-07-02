@@ -20,9 +20,10 @@ class RouteResult:
     answer: str
     sources: list[Source] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
+    rewritten_query: str | None = None
 
 
-RouteHandler = Callable[[IntentResult, str, str, list[dict[str, str]]], Awaitable[RouteResult]]
+RouteHandler = Callable[..., Awaitable[RouteResult]]
 
 
 class CustomerRouter:
@@ -61,9 +62,20 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]] | None = None,
+        memory_summary: str = "",
+        key_facts: dict[str, Any] | None = None,
+        rewritten_query: str | None = None,
     ) -> RouteResult:
         handler = self.routes.get(intent_result.intent, self._handle_unknown)
-        return await handler(intent_result, message, user_id, recent_turns or [])
+        return await handler(
+            intent_result,
+            message,
+            user_id,
+            recent_turns or [],
+            memory_summary,
+            key_facts or {},
+            rewritten_query or message,
+        )
 
     async def _handle_faq(
         self,
@@ -71,8 +83,18 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
-        return self._answer_with_rag(message, recent_turns, scenario="faq")
+        return self._answer_with_rag(
+            message,
+            recent_turns,
+            scenario="faq",
+            memory_summary=memory_summary,
+            key_facts=key_facts,
+            rewritten_query=rewritten_query,
+        )
 
     async def _handle_package_query(
         self,
@@ -80,6 +102,9 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
         output, call = await self._call_tool(
             "query_user_package",
@@ -87,9 +112,9 @@ class CustomerRouter:
             lambda: self.package_tool.query_user_package(user_id),
         )
         if not call.success:
-            return RouteResult(answer="套餐查询失败，请稍后再试。", tool_calls=[call])
+            return RouteResult(answer="套餐查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
         answer = f"你当前套餐是 {output['package_name']}，月费 {output['monthly_fee']} 元，包含 {output['data_quota']} 流量。"
-        return RouteResult(answer=answer, tool_calls=[call])
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
 
     async def _handle_package_recommend(
         self,
@@ -97,11 +122,24 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
-        result = self._answer_with_rag(message, recent_turns, scenario="package_recommend")
+        result = self._answer_with_rag(
+            message,
+            recent_turns,
+            scenario="package_recommend",
+            memory_summary=memory_summary,
+            key_facts=key_facts,
+            rewritten_query=rewritten_query,
+        )
         if result.sources:
             return result
-        return RouteResult(answer="我可以先帮你查询当前套餐，再结合流量、通话和预算诉求建议转人工客服确认可办理套餐。")
+        return RouteResult(
+            answer="我可以先帮你查询当前套餐，再结合流量、通话和预算诉求建议转人工客服确认可办理套餐。",
+            rewritten_query=rewritten_query,
+        )
 
     async def _handle_package_change(
         self,
@@ -109,6 +147,9 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
         target_package = str(intent_result.slots.get("target_package", "5G畅享套餐"))
         output, call = await self._call_tool(
@@ -117,9 +158,9 @@ class CustomerRouter:
             lambda: self.package_tool.change_package(user_id, target_package),
         )
         if not call.success:
-            return RouteResult(answer="套餐办理失败，请稍后再试或转人工客服。", tool_calls=[call])
+            return RouteResult(answer="套餐办理失败，请稍后再试或转人工客服。", tool_calls=[call], rewritten_query=rewritten_query)
         answer = f"已提交套餐变更申请，目标套餐：{output['target_package']}，单号：{output['order_id']}。"
-        return RouteResult(answer=answer, tool_calls=[call])
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
 
     async def _handle_bill_query(
         self,
@@ -127,6 +168,9 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
         month = str(intent_result.slots.get("month", "本月"))
         output, call = await self._call_tool(
@@ -135,12 +179,12 @@ class CustomerRouter:
             lambda: self.bill_tool.query_bill(user_id, month),
         )
         if not call.success:
-            return RouteResult(answer="账单查询失败，请稍后再试。", tool_calls=[call])
+            return RouteResult(answer="账单查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
         answer = (
             f"{output['month']} 账单金额为 {output['amount']} 元，"
             f"状态：{output['status']}，主要费用项：{', '.join(output['items'])}。"
         )
-        return RouteResult(answer=answer, tool_calls=[call])
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
 
     async def _handle_bill_explain(
         self,
@@ -148,8 +192,18 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
-        return self._answer_with_rag(message, recent_turns, scenario="bill_explain")
+        return self._answer_with_rag(
+            message,
+            recent_turns,
+            scenario="bill_explain",
+            memory_summary=memory_summary,
+            key_facts=key_facts,
+            rewritten_query=rewritten_query,
+        )
 
     async def _handle_fault_diagnosis(
         self,
@@ -157,8 +211,19 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
-        return self._answer_with_rag(message, recent_turns, scenario="fault_diagnosis", top_k=2)
+        return self._answer_with_rag(
+            message,
+            recent_turns,
+            scenario="fault_diagnosis",
+            top_k=2,
+            memory_summary=memory_summary,
+            key_facts=key_facts,
+            rewritten_query=rewritten_query,
+        )
 
     async def _handle_network_repair(
         self,
@@ -166,6 +231,9 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
         slots = {**intent_result.slots, "issue_type": "network"}
         output, call = await self._call_tool(
@@ -174,10 +242,10 @@ class CustomerRouter:
             lambda: self.ticket_tool.create_ticket(user_id, "network", message),
         )
         if not call.success:
-            return RouteResult(answer="网络报修提交失败，请稍后再试或转人工客服。", tool_calls=[call])
+            return RouteResult(answer="网络报修提交失败，请稍后再试或转人工客服。", tool_calls=[call], rewritten_query=rewritten_query)
         answer = f"已为你提交网络报修工单，工单号：{output['ticket_id']}，当前状态：{output['status']}。"
         intent_result.slots.update(slots)
-        return RouteResult(answer=answer, tool_calls=[call])
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
 
     async def _handle_ticket_create(
         self,
@@ -185,6 +253,9 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
         issue_type = str(intent_result.slots.get("issue_type", "general"))
         output, call = await self._call_tool(
@@ -193,9 +264,9 @@ class CustomerRouter:
             lambda: self.ticket_tool.create_ticket(user_id, issue_type, message),
         )
         if not call.success:
-            return RouteResult(answer="工单创建失败，请稍后再试。", tool_calls=[call])
+            return RouteResult(answer="工单创建失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
         answer = f"售后工单已创建，工单号：{output['ticket_id']}，当前状态：{output['status']}。"
-        return RouteResult(answer=answer, tool_calls=[call])
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
 
     async def _handle_ticket_query(
         self,
@@ -203,19 +274,22 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
         ticket_id = str(intent_result.slots.get("ticket_id", "")).strip()
         if not ticket_id:
-            return RouteResult(answer="请提供需要查询的工单号，我再帮你查看处理进度。")
+            return RouteResult(answer="请提供需要查询的工单号，我再帮你查看处理进度。", rewritten_query=rewritten_query)
         output, call = await self._call_tool(
             "query_ticket",
             {"user_id": user_id, "ticket_id": ticket_id},
             lambda: self.ticket_tool.query_ticket(user_id, ticket_id),
         )
         if not call.success:
-            return RouteResult(answer="工单查询失败，请稍后再试。", tool_calls=[call])
+            return RouteResult(answer="工单查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
         answer = f"工单 {output['ticket_id']} 当前状态：{output['status']}，处理说明：{output['summary']}"
-        return RouteResult(answer=answer, tool_calls=[call])
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
 
     async def _handle_human_transfer(
         self,
@@ -223,8 +297,11 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
-        return RouteResult(answer="我会为你转接人工客服，请稍候。")
+        return RouteResult(answer="我会为你转接人工客服，请稍候。", rewritten_query=rewritten_query)
 
     async def _handle_unknown(
         self,
@@ -232,8 +309,14 @@ class CustomerRouter:
         message: str,
         user_id: str,
         recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
     ) -> RouteResult:
-        return RouteResult(answer="我还不能确定你的具体诉求。你可以补充说明是要查套餐、查账单、排查故障还是创建工单。")
+        return RouteResult(
+            answer="我还不能确定你的具体诉求。你可以补充说明是要查套餐、查账单、排查故障还是创建工单。",
+            rewritten_query=rewritten_query,
+        )
 
     def _answer_with_rag(
         self,
@@ -241,17 +324,23 @@ class CustomerRouter:
         recent_turns: list[dict[str, str]],
         scenario: str,
         top_k: int = 3,
+        memory_summary: str = "",
+        key_facts: dict[str, Any] | None = None,
+        rewritten_query: str | None = None,
     ) -> RouteResult:
-        sources = self.retriever.search(message, top_k=top_k)
+        search_query = rewritten_query or message
+        sources = self.retriever.search(search_query, top_k=top_k)
         if not sources:
-            return RouteResult(answer=NO_SOURCE_ANSWER)
+            return RouteResult(answer=NO_SOURCE_ANSWER, rewritten_query=search_query)
         answer = self.rag_answer_chain.generate(
-            question=message,
+            question=search_query,
             sources=sources,
             conversation_context=recent_turns,
+            conversation_summary=memory_summary,
+            key_facts=key_facts or {},
             scenario=scenario,
         )
-        return RouteResult(answer=answer, sources=sources)
+        return RouteResult(answer=answer, sources=sources, rewritten_query=search_query)
 
     async def _call_tool(
         self,

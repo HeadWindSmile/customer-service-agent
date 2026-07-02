@@ -13,7 +13,11 @@ class Settings:
     app_name: str = os.getenv("APP_NAME", "Customer Service Agent")
     app_version: str = os.getenv("APP_VERSION", "0.1.0")
     app_env: str = os.getenv("APP_ENV", "local")
-    memory_max_turns: int = int(os.getenv("MEMORY_MAX_TURNS", "8"))
+    memory_backend: str = os.getenv("MEMORY_BACKEND", "memory").lower()
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    memory_ttl_seconds: int = int(os.getenv("MEMORY_TTL_SECONDS", "604800"))
+    memory_recent_turns: int = int(os.getenv("MEMORY_RECENT_TURNS", os.getenv("MEMORY_MAX_TURNS", "8")))
+    memory_max_turns: int = memory_recent_turns
     mock_knowledge_path: str = os.getenv("MOCK_KNOWLEDGE_PATH", "data/mock_knowledge.md")
     knowledge_dir: str = os.getenv("KNOWLEDGE_DIR", "data/knowledge")
     vector_store: str = os.getenv("VECTOR_STORE", "mock")

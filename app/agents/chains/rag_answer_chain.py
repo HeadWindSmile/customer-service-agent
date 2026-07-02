@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from typing import Any
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -36,6 +37,8 @@ class RagAnswerChain:
         question: str,
         sources: list[Source],
         conversation_context: Sequence[dict[str, str]] | None = None,
+        conversation_summary: str = "",
+        key_facts: dict[str, Any] | None = None,
         scenario: str = "faq",
     ) -> str:
         if not sources:
@@ -44,7 +47,11 @@ class RagAnswerChain:
         inputs = {
             "question": question,
             "context": _format_sources(sources),
-            "conversation_context": _format_conversation_context(conversation_context or []),
+            "conversation_context": _format_memory_context(
+                conversation_summary,
+                key_facts or {},
+                conversation_context or [],
+            ),
             "source_titles": "、".join(_unique_source_titles(sources)),
             "scenario": _scenario_instruction(scenario),
         }
@@ -68,10 +75,17 @@ def _format_sources(sources: list[Source]) -> str:
     return "\n\n".join(rows)
 
 
-def _format_conversation_context(turns: Sequence[dict[str, str]]) -> str:
-    if not turns:
-        return "无"
+def _format_memory_context(
+    summary: str,
+    key_facts: dict[str, Any],
+    turns: Sequence[dict[str, str]],
+) -> str:
     lines: list[str] = []
+    if summary:
+        lines.append(f"历史摘要：{summary}")
+    if key_facts:
+        facts = "，".join(f"{key}={value}" for key, value in key_facts.items())
+        lines.append(f"关键事实：{facts}")
     for turn in turns:
         user = turn.get("user", "").strip()
         assistant = turn.get("assistant", "").strip()

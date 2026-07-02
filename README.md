@@ -6,7 +6,7 @@
 
 ## 当前阶段能力
 
-当前处于第 5 阶段：业务工具调用与 Spring Boot 边界。
+当前处于第 6 阶段：Redis 会话记忆与多轮上下文。
 
 已实现：
 
@@ -20,7 +20,7 @@
 8. 新增独立 `mock_business_service/`，用 FastAPI 模拟原有 Spring Boot 业务系统内部 HTTP API。
 9. AI 服务通过 `BusinessClient` 抽象访问业务能力，支持 `HttpBusinessClient` 和本地 `MockBusinessClient` fallback。
 10. 业务工具调用支持 timeout、业务异常、服务不可用降级，并在 `tool_calls` 中记录 `tool_name`、`input`、`output`、`success`、`latency_ms`、`error_message`。
-11. 内存版会话记忆，保留最近 8 轮。
+11. 会话记忆升级为 `MemoryStore` 抽象，支持 Redis 存储和内存 fallback，按 `user_id + session_id` 隔离。
 12. 最小 RBAC：普通用户只能查自己，客服可代查并输出审计日志。
 13. 最小内容安全：输入敏感词检查、输出高危承诺检查。
 14. 结构化响应：`answer`、`intent`、`slots`、`confidence`、`intent_reason`、`sources`、`tool_calls`、`trace_id`、`latency_ms`。
@@ -30,6 +30,10 @@
 18. 默认 `MockLLM`，不配置 API Key 也能跑通问答链路。
 19. 可通过 OpenAI-compatible API 接入 `qwen-plus` 或其他兼容模型。
 20. sources 为空时直接兜底转人工，不允许 LLM 编造答案。
+21. 最近 8 轮上下文会进入 RAG Prompt，超过窗口的早期历史会压缩进 Summary Buffer。
+22. 支持 `key_facts`，用于保存当前套餐、最近账单月份、最近工单号等安全业务事实。
+23. 支持基础指代消解，响应中返回可选 `rewritten_query`，RAG 检索使用改写后的独立问题。
+24. memory 读写耗时、backend、summary/key_facts 状态进入结构化 trace 日志。
 
 ## 架构说明
 
@@ -61,6 +65,18 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+默认 `MEMORY_BACKEND=memory`，不依赖 Redis 也可以启动。需要使用 Redis 会话记忆时：
+
+```bash
+$env:MEMORY_BACKEND="redis"
+$env:REDIS_URL="redis://localhost:6379/0"
+$env:MEMORY_TTL_SECONDS="604800"
+$env:MEMORY_RECENT_TURNS="8"
+uvicorn app.main:app --reload
+```
+
+如果 Redis 不可用，系统会自动降级到内存版会话，保证本地最小版本可运行。
+
 第 5 阶段推荐启动两个服务，模拟“Python/FastAPI AI 服务 + Java/Spring Boot 业务系统”：
 
 ```bash
@@ -81,6 +97,8 @@ Docker Compose 启动：
 docker compose up -d
 docker compose ps
 ```
+
+Docker Compose 会同时启动 `ai-service`、`mock-business-service` 和 `redis`。
 
 接口文档：
 
@@ -135,6 +153,49 @@ Router
 ```bash
 BUSINESS_SERVICE_BASE_URL=http://127.0.0.1:8010
 BUSINESS_SERVICE_TIMEOUT_MS=800
+```
+
+## Redis 会话记忆与多轮上下文
+
+第 6 阶段把原来的进程内最近 8 轮记忆升级为统一 `MemoryStore` 抽象：
+
+```text
+CustomerAgent
+  -> ConversationMemoryManager
+  -> MemoryStore
+     -> RedisMemory
+     -> InMemoryMemoryStore fallback
+```
+
+为什么不能只用本地内存：
+
+1. 多实例部署时，同一用户的下一轮请求可能落到另一台实例，进程内存无法共享。
+2. 服务重启后上下文会丢失，不利于客服多轮对话体验。
+3. 只用 `session_id` 容易串话，第 6 阶段改为 `user_id + session_id` 共同隔离。
+
+Redis key 设计：
+
+```text
+customer_agent:{user_id}:{session_id}:recent_messages
+customer_agent:{user_id}:{session_id}:summary
+customer_agent:{user_id}:{session_id}:key_facts
+```
+
+上下文策略：
+
+1. 最近 8 轮保留为原始短期上下文。
+2. 超过 8 轮后，更早历史压缩到 summary buffer。
+3. `key_facts` 只保存白名单业务事实，例如当前套餐、最近账单月份、最近工单号，不保存手机号、身份证、银行卡等隐私字段。
+4. query rewriter 使用 recent turns + key_facts 做基础指代消解，例如把“这个套餐什么时候生效”改写成“5G畅享套餐什么时候生效”。
+5. RAG 检索使用 `rewritten_query`，响应中也返回该字段，便于演示和排查。
+
+会话记忆配置：
+
+```bash
+MEMORY_BACKEND=memory
+REDIS_URL=redis://localhost:6379/0
+MEMORY_TTL_SECONDS=604800
+MEMORY_RECENT_TURNS=8
 ```
 
 ## 知识库入库
@@ -268,6 +329,44 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
 curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
   -H "Content-Type: application/json" ^
   -d "{\"user_id\":\"u1001\",\"session_id\":\"phase5-s3\",\"role\":\"user\",\"message\":\"我要创建工单，宽带断网\"}"
+```
+
+第 6 阶段多轮对话示例：
+
+套餐指代消解：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase6-package\",\"role\":\"user\",\"message\":\"查询我的当前套餐\"}"
+
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase6-package\",\"role\":\"user\",\"message\":\"这个套餐什么时候生效？\"}"
+```
+
+工单指代消解：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase6-ticket\",\"role\":\"user\",\"message\":\"我要创建工单，宽带断网\"}"
+
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase6-ticket\",\"role\":\"user\",\"message\":\"刚才那个工单进度怎么样？\"}"
+```
+
+账单指代消解：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase6-bill\",\"role\":\"user\",\"message\":\"帮我查本月账单\"}"
+
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"u1001\",\"session_id\":\"phase6-bill\",\"role\":\"user\",\"message\":\"这笔费用为什么会有超量流量费？\"}"
 ```
 
 FAQ 查询：
@@ -411,6 +510,21 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 6. 工具调用失败时返回友好文案，`tool_calls` 记录 `success=false`、`output`、`latency_ms` 和 `error_message`。
 7. `docker-compose.yml` 同时启动 `ai-service` 和 `mock-business-service`，两者通过服务名通信。
 8. pytest 补充业务 client、tools HTTP 边界和 chat 业务主链路测试。
+
+## 第六阶段已实现内容
+
+第六阶段把本地会话记忆升级为 Redis 会话记忆与多轮上下文：
+
+1. `app/memory/base.py` 定义异步 `MemoryStore` 接口。
+2. `app/memory/memory_store.py` 保留 `InMemoryMemoryStore` fallback。
+3. `app/memory/redis_memory.py` 使用 Redis list/string 保存 recent messages、summary 和 key_facts。
+4. `app/memory/factory.py` 在 Redis 不可用时自动降级到内存。
+5. `ConversationMemoryManager` 负责最近 8 轮、summary buffer 和 key_facts 更新。
+6. `QueryRewriter` 实现基础指代消解。
+7. RAG 检索使用 `rewritten_query`，响应返回该字段。
+8. memory 读写耗时进入 trace 日志。
+9. docker compose 新增 Redis 服务。
+10. pytest 补充 memory、Redis、query rewrite 和多轮 chat 测试。
 
 ## slots 设计
 

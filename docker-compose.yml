@@ -7,10 +7,15 @@ services:
     environment:
       BUSINESS_SERVICE_BASE_URL: http://mock-business-service:8010
       BUSINESS_SERVICE_TIMEOUT_MS: 800
+      MEMORY_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      MEMORY_TTL_SECONDS: 604800
+      MEMORY_RECENT_TURNS: 8
     ports:
       - "8000:8000"
     depends_on:
       - mock-business-service
+      - redis
     command: >
       sh -c "pip install -r requirements.txt
       && uvicorn app.main:app --host 0.0.0.0 --port 8000"
@@ -25,3 +30,8 @@ services:
     command: >
       sh -c "pip install -r requirements.txt
       && uvicorn mock_business_service.main:app --host 0.0.0.0 --port 8010"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
