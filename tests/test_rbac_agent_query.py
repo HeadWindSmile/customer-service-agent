@@ -19,7 +19,7 @@ def test_agent_can_query_target_bill_with_agent_permission():
 
         assert response.error is None
         call = response.tool_calls[0]
-        assert call.input["user_id"] == "u1002"
+        assert call.input["user_id"] == "u***2"
         assert call.permission == "BILL_QUERY_AGENT"
         assert call.permission_checked is True
         assert call.audit_logged is True

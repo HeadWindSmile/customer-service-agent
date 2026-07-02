@@ -9,7 +9,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 7 阶段：RBAC 权限控制与审计日志",
+        description="第 8 阶段：内容安全防护体系",
     )
     app.include_router(chat_router)
     return app

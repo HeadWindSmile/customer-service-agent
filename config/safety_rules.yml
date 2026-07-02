@@ -1,0 +1,52 @@
+{
+  "rules": [
+    {
+      "id": "kw_prompt_injection",
+      "risk_type": "prompt_injection",
+      "risk_level": "HIGH",
+      "scopes": ["input", "tool"],
+      "keywords": ["忽略之前指令", "无视之前指令", "系统提示词", "隐藏规则", "绕过权限"],
+      "message": "检测到提示词注入或绕过系统约束的表达。"
+    },
+    {
+      "id": "kw_jailbreak",
+      "risk_type": "jailbreak",
+      "risk_level": "HIGH",
+      "scopes": ["input", "tool"],
+      "keywords": ["越狱", "jailbreak", "DAN模式", "不受限制回答"],
+      "message": "检测到越狱诱导。"
+    },
+    {
+      "id": "kw_privacy_request",
+      "risk_type": "privacy_leak",
+      "risk_level": "HIGH",
+      "scopes": ["input", "tool", "output"],
+      "keywords": ["身份证号", "银行卡密码", "验证码", "内部系统密码"],
+      "message": "检测到隐私或内部敏感信息。"
+    },
+    {
+      "id": "kw_illegal_request",
+      "risk_type": "illegal_request",
+      "risk_level": "CRITICAL",
+      "scopes": ["input", "tool"],
+      "keywords": ["盗取账号", "破解密码", "撞库", "钓鱼链接", "木马"],
+      "message": "检测到违法违规请求。"
+    },
+    {
+      "id": "kw_output_commitment",
+      "risk_type": "price_commitment",
+      "risk_level": "HIGH",
+      "scopes": ["output"],
+      "keywords": ["保证赔偿", "一定免费", "绝对不会", "百分百解决", "内部数据"],
+      "message": "检测到未经确认的资费、赔偿或内部数据承诺。"
+    },
+    {
+      "id": "kw_abuse",
+      "risk_type": "abuse",
+      "risk_level": "MEDIUM",
+      "scopes": ["input"],
+      "keywords": ["垃圾客服", "傻逼", "去死", "废物"],
+      "message": "检测到攻击性表达，建议转人工安抚。"
+    }
+  ]
+}

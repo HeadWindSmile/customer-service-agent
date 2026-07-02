@@ -48,6 +48,10 @@ class Settings:
     business_service_timeout_ms: int = int(os.getenv("BUSINESS_SERVICE_TIMEOUT_MS", "800"))
     audit_log_enabled: bool = _env_bool("AUDIT_LOG_ENABLED", "true")
     audit_log_path: str = os.getenv("AUDIT_LOG_PATH", "logs/audit.log")
+    safety_enabled: bool = _env_bool("SAFETY_ENABLED", "true")
+    safety_rules_path: str = os.getenv("SAFETY_RULES_PATH", "config/safety_rules.yml")
+    safety_review_queue_path: str = os.getenv("SAFETY_REVIEW_QUEUE_PATH", "logs/review_queue.jsonl")
+    safety_semantic_detector: str = os.getenv("SAFETY_SEMANTIC_DETECTOR", "mock").lower()
     safety_blocked_words: list[str] = field(
         default_factory=lambda: _split_env(
             "SAFETY_BLOCKED_WORDS",

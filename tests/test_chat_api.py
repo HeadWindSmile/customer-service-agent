@@ -104,7 +104,7 @@ def test_agent_can_query_target_user_with_audit_log():
     data = response.json()
     assert_base_response(data)
     assert data["error"] is None
-    assert data["tool_calls"][0]["input"]["user_id"] == "u1002"
+    assert data["tool_calls"][0]["input"]["user_id"] == "u***2"
 
 
 def test_safety_guard_blocks_sensitive_input():

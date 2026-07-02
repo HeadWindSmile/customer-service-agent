@@ -53,3 +53,4 @@ class ChatResponse(BaseModel):
     latency_ms: float
     error: str | None = None
     rewritten_query: str | None = None
+    safety_result: dict[str, Any] | None = None

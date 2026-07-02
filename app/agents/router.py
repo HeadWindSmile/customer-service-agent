@@ -9,6 +9,8 @@ from app.audit import AuditLogger
 from app.auth.context import AuthContext
 from app.auth.rbac import ForbiddenError, Permission, PermissionChecker
 from app.rag.retriever import KnowledgeRetriever
+from app.safety.guard import TOOL_PARAM_BLOCKED_ANSWER, SafetyGuard, SafetyViolation
+from app.safety.risk_level import SafetyAction
 from app.schemas.chat import IntentResult, Source, ToolCall
 from app.tools.bill_tool import BillTool
 from app.tools.business_client import BusinessClient, BusinessClientError, create_business_client
@@ -41,10 +43,12 @@ class CustomerRouter:
         business_client: BusinessClient | None = None,
         permission_checker: PermissionChecker | None = None,
         audit_logger: AuditLogger | None = None,
+        safety_guard: SafetyGuard | None = None,
     ) -> None:
         business_client = business_client or create_business_client()
         self.permission_checker = permission_checker or PermissionChecker()
         self.audit_logger = audit_logger or AuditLogger()
+        self.safety_guard = safety_guard or SafetyGuard()
         self.retriever = KnowledgeRetriever()
         self.rag_answer_chain = RagAnswerChain()
         self.package_tool = PackageTool(business_client)
@@ -491,6 +495,10 @@ class CustomerRouter:
                 )
                 raise
 
+        tool_safety = self.safety_guard.scan_tool_params(input_data, trace_id=trace_id)
+        if tool_safety.action != SafetyAction.ALLOW:
+            raise SafetyViolation(TOOL_PARAM_BLOCKED_ANSWER, tool_safety)
+
         try:
             output = await func()
             success = True
@@ -522,8 +530,8 @@ class CustomerRouter:
 
         call = ToolCall(
             tool_name=tool_name,
-            input=input_data,
-            output=output,
+            input=self.safety_guard.sanitize_tool_payload(input_data),
+            output=self.safety_guard.sanitize_tool_payload(output),
             success=success,
             latency_ms=elapsed_ms() - started,
             error_message=error_message,
