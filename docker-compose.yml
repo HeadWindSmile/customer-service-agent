@@ -1,37 +1,92 @@
 services:
   ai-service:
-    image: python:3.11-slim
+    build: .
+    image: customer-service-agent:local
     working_dir: /app
-    volumes:
-      - .:/app
     environment:
+      APP_ENV: docker
       BUSINESS_SERVICE_BASE_URL: http://mock-business-service:8010
       BUSINESS_SERVICE_TIMEOUT_MS: 800
+      BUSINESS_SERVICE_RETRY_ATTEMPTS: 2
+      BUSINESS_SERVICE_RETRY_BACKOFF_MS: 50
+      BUSINESS_SERVICE_MAX_CONNECTIONS: 20
+      BUSINESS_SERVICE_MAX_KEEPALIVE_CONNECTIONS: 10
+      BUSINESS_SERVICE_CIRCUIT_BREAKER_ENABLED: "true"
+      BUSINESS_SERVICE_CIRCUIT_FAILURE_THRESHOLD: 3
+      BUSINESS_SERVICE_CIRCUIT_RESET_SECONDS: 30
       MEMORY_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
       MEMORY_TTL_SECONDS: 604800
       MEMORY_RECENT_TURNS: 8
+      LLM_PROVIDER: mock
+      EVENT_PRODUCER: mock
+      EVENT_LOG_PATH: /app/logs/events.jsonl
+      TRACE_ENABLED: "true"
+      TRACE_STORAGE_DIR: /app/logs/traces
+      AUDIT_LOG_PATH: /app/logs/audit.log
+      SAFETY_REVIEW_QUEUE_PATH: /app/logs/review_queue.jsonl
+      RAG_CACHE_ENABLED: "true"
+      RAG_CACHE_TTL_SECONDS: 300
+      RAG_CACHE_MAX_SIZE: 128
+      METRICS_LITE_ENABLED: "true"
+      METRICS_LITE_WINDOW_SIZE: 200
+      READINESS_TIMEOUT_SECONDS: 1.5
     ports:
       - "8000:8000"
+    volumes:
+      - app-logs:/app/logs
+      - vector-store:/app/data/vector_store
     depends_on:
-      - mock-business-service
-      - redis
-    command: >
-      sh -c "pip install -r requirements.txt
-      && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      mock-business-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
 
   mock-business-service:
-    image: python:3.11-slim
+    build: .
+    image: customer-service-agent:local
     working_dir: /app
-    volumes:
-      - .:/app
     ports:
       - "8010:8010"
-    command: >
-      sh -c "pip install -r requirements.txt
-      && uvicorn mock_business_service.main:app --host 0.0.0.0 --port 8010"
+    command: ["uvicorn", "mock_business_service.main:app", "--host", "0.0.0.0", "--port", "8010"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  app-logs:
+  vector-store:
+  redis-data:

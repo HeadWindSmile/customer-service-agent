@@ -1,8 +1,10 @@
 from app.config import settings
 from app.rag.embeddings import create_embedding
+from app.rag.cache import rag_search_cache
 from app.rag.loader import KnowledgeLoader
 from app.rag.splitter import ChineseTextSplitter
 from app.rag.vector_store import BaseVectorStore, create_vector_store
+from app.observability.tracing import add_attribute, add_event
 from app.schemas.chat import Source
 
 
@@ -27,7 +29,22 @@ class KnowledgeRetriever:
         self._ensure_index()
 
     def search(self, query: str, top_k: int = 3) -> list[Source]:
-        return self.vector_store.search(query, top_k or self.top_k)
+        resolved_top_k = top_k or self.top_k
+        if settings.rag_cache_enabled:
+            cached = rag_search_cache.get(query, resolved_top_k)
+            if cached is not None:
+                payload = {"cache_hit": True, "top_k": resolved_top_k, "source_count": len(cached)}
+                add_attribute("rag_cache_hit", True)
+                add_event("rag.cache_hit", payload)
+                return cached
+
+        sources = self.vector_store.search(query, resolved_top_k)
+        if settings.rag_cache_enabled:
+            rag_search_cache.set(query, resolved_top_k, sources)
+        payload = {"cache_hit": False, "top_k": resolved_top_k, "source_count": len(sources)}
+        add_attribute("rag_cache_hit", False)
+        add_event("rag.cache_miss", payload)
+        return sources
 
     def rebuild_index(self) -> int:
         documents = KnowledgeLoader(self.knowledge_dir).load()

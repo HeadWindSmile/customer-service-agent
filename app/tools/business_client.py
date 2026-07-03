@@ -1,6 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from time import monotonic
 from typing import Any
 from uuid import uuid4
 
@@ -162,10 +163,36 @@ class HttpBusinessClient(BusinessClient):
         timeout_ms: int = 800,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        retry_attempts: int | None = None,
+        retry_backoff_ms: int | None = None,
+        max_connections: int | None = None,
+        max_keepalive_connections: int | None = None,
+        circuit_breaker_enabled: bool | None = None,
+        circuit_failure_threshold: int | None = None,
+        circuit_reset_seconds: float | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_ms / 1000
         self.transport = transport
+        self.retry_attempts = max(1, retry_attempts or settings.business_service_retry_attempts)
+        self.retry_backoff_seconds = (retry_backoff_ms or settings.business_service_retry_backoff_ms) / 1000
+        self.max_connections = max_connections or settings.business_service_max_connections
+        self.max_keepalive_connections = (
+            max_keepalive_connections or settings.business_service_max_keepalive_connections
+        )
+        self.circuit_breaker_enabled = (
+            settings.business_service_circuit_breaker_enabled
+            if circuit_breaker_enabled is None
+            else circuit_breaker_enabled
+        )
+        self.circuit_failure_threshold = max(
+            1,
+            circuit_failure_threshold or settings.business_service_circuit_failure_threshold,
+        )
+        self.circuit_reset_seconds = circuit_reset_seconds or settings.business_service_circuit_reset_seconds
+        self._client: httpx.AsyncClient | None = None
+        self._failure_count = 0
+        self._circuit_opened_at: float | None = None
 
     async def query_user_profile(self, user_id: str) -> dict[str, Any]:
         return await self._request("GET", f"/internal/users/{user_id}", retry=True)
@@ -205,24 +232,32 @@ class HttpBusinessClient(BusinessClient):
         json: dict[str, Any] | None = None,
         retry: bool = False,
     ) -> dict[str, Any]:
-        attempts = 2 if retry else 1
+        if self._is_circuit_open():
+            raise BusinessClientError(
+                "业务服务连续失败，短时间内已熔断。",
+                error_code="BUSINESS_CIRCUIT_OPEN",
+                retriable=True,
+            )
+
+        attempts = self.retry_attempts if retry else 1
         for index in range(attempts):
             try:
-                async with httpx.AsyncClient(
-                    base_url=self.base_url,
-                    timeout=self.timeout_seconds,
-                    transport=self.transport,
-                ) as client:
-                    response = await client.request(method, path, params=params, json=json)
+                client = self._get_client()
+                response = await client.request(method, path, params=params, json=json)
                 if response.status_code >= 500 and index + 1 < attempts:
-                    await asyncio.sleep(0.05)
+                    self._record_failure()
+                    await self._sleep_before_retry(index)
                     continue
                 if response.status_code >= 400:
+                    if response.status_code >= 500:
+                        self._record_failure()
                     raise self._build_error(response)
+                self._record_success()
                 return response.json()
             except httpx.TimeoutException as exc:
+                self._record_failure()
                 if index + 1 < attempts:
-                    await asyncio.sleep(0.05)
+                    await self._sleep_before_retry(index)
                     continue
                 raise BusinessClientError(
                     "业务服务调用超时。",
@@ -230,8 +265,9 @@ class HttpBusinessClient(BusinessClient):
                     retriable=True,
                 ) from exc
             except httpx.TransportError as exc:
+                self._record_failure()
                 if index + 1 < attempts:
-                    await asyncio.sleep(0.05)
+                    await self._sleep_before_retry(index)
                     continue
                 raise BusinessClientError(
                     "业务服务暂不可用。",
@@ -239,6 +275,47 @@ class HttpBusinessClient(BusinessClient):
                     retriable=True,
                 ) from exc
         raise BusinessClientError("业务服务调用失败。", retriable=True)
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            limits = httpx.Limits(
+                max_connections=self.max_connections,
+                max_keepalive_connections=self.max_keepalive_connections,
+            )
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=self.timeout_seconds,
+                transport=self.transport,
+                limits=limits,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+
+    async def _sleep_before_retry(self, index: int) -> None:
+        await asyncio.sleep(self.retry_backoff_seconds * (index + 1))
+
+    def _record_success(self) -> None:
+        self._failure_count = 0
+        self._circuit_opened_at = None
+
+    def _record_failure(self) -> None:
+        if not self.circuit_breaker_enabled:
+            return
+        self._failure_count += 1
+        if self._failure_count >= self.circuit_failure_threshold:
+            self._circuit_opened_at = monotonic()
+
+    def _is_circuit_open(self) -> bool:
+        if not self.circuit_breaker_enabled or self._circuit_opened_at is None:
+            return False
+        if monotonic() - self._circuit_opened_at >= self.circuit_reset_seconds:
+            self._failure_count = 0
+            self._circuit_opened_at = None
+            return False
+        return True
 
     def _build_error(self, response: httpx.Response) -> BusinessClientError:
         error_code = f"HTTP_{response.status_code}"

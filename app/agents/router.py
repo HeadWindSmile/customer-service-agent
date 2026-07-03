@@ -8,7 +8,7 @@ from app.agents.prompts import NO_SOURCE_ANSWER
 from app.audit import AuditLogger
 from app.auth.context import AuthContext
 from app.auth.rbac import ForbiddenError, Permission, PermissionChecker
-from app.observability.tracing import add_attribute, add_event, end_span, start_span
+from app.observability.tracing import add_attribute, add_event, end_span, get_current_trace, start_span
 from app.rag.retriever import KnowledgeRetriever
 from app.safety.guard import TOOL_PARAM_BLOCKED_ANSWER, SafetyGuard, SafetyViolation
 from app.safety.risk_level import SafetyAction
@@ -454,8 +454,11 @@ class CustomerRouter:
         search_query = rewritten_query or message
         retrieve_span = start_span("rag.retrieve", {"scenario": scenario, "top_k": top_k})
         sources = self.retriever.search(search_query, top_k=top_k)
+        trace = get_current_trace()
+        cache_hit = bool(trace.attributes.get("rag_cache_hit")) if trace else False
         source_summary = {
             "top_k": top_k,
+            "cache_hit": cache_hit,
             "source_count": len(sources),
             "doc_ids": [source.doc_id for source in sources],
             "scores": [source.score for source in sources],

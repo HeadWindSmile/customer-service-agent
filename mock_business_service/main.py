@@ -20,6 +20,13 @@ app = FastAPI(
 )
 
 
+@app.get("/health")
+def health() -> dict:
+    """给 Docker Compose 和 AI 服务 readiness 使用的轻量存活检查。"""
+
+    return {"status": "ok", "service": "mock-business-service"}
+
+
 def _business_error(status_code: int, error_code: str, message: str) -> None:
     # 统一错误结构，便于 AI 服务把业务失败写入 tool_calls，而不是暴露框架异常。
     detail = ErrorDetail(error_code=error_code, message=message).model_dump()

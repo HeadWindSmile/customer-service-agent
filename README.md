@@ -6,7 +6,7 @@
 
 ## 当前阶段能力
 
-当前处于第 10 阶段：可观测性与 AI 效果评测体系。
+当前处于第 11 阶段：性能优化与部署。
 
 已实现：
 
@@ -46,6 +46,16 @@
 34. 每次 `/api/chat` 会写入本地 trace 文件 `logs/traces/{trace_id}.json`，支持 `GET /api/traces/{trace_id}` 回放。
 35. trace 记录 RAG 检索、LLM 调用、token 粗估、工具调用、内容安全和事件投递结果。
 36. 新增 `evals/` 离线评测体系，支持 JSONL 数据集、批量调用 `/api/chat`、指标计算和 JSON/Markdown 报告。
+37. 新增 `GET /health` 存活检查和 `GET /ready` 依赖就绪检查。
+38. `/ready` 会检查 app、memory backend、business service、vector store、LLM provider、event producer 和 trace storage。
+39. 新增 `GET /metrics-lite`，提供进程内轻量请求数、成功率、平均耗时和 P95 指标。
+40. `HttpBusinessClient` 支持连接复用、连接池、可配置 retry/backoff 和简化 circuit breaker。
+41. RAG 知识库检索新增轻量 TTL 缓存，并在 trace 中记录 `cache_hit`。
+42. 新增根目录 `Dockerfile` 和 `.dockerignore`。
+43. 完善 `docker-compose.yml`，支持 `ai-service`、`mock-business-service`、`redis`、healthcheck、volume 和依赖就绪顺序。
+44. 新增 `scripts/smoke_test.py`，用于本地部署后的核心链路冒烟验证。
+45. 新增 `scripts/simple_load_test.py`，只做少量并发请求统计，不作为生产压测平台。
+46. 默认本地模式仍不依赖真实 LLM、真实 RocketMQ、真实 Redis 或真实数据库。
 
 ## 架构说明
 
@@ -113,9 +123,18 @@ Docker Compose 启动：
 ```bash
 docker compose up -d
 docker compose ps
+docker compose logs ai-service
 ```
 
-Docker Compose 会同时启动 `ai-service`、`mock-business-service` 和 `redis`。
+Docker Compose 会同时启动 `ai-service`、`mock-business-service` 和 `redis`。第 11 阶段已为三个核心服务增加 healthcheck，并通过 volume 保存 `logs/`、本地向量索引和 Redis 数据。
+
+健康检查：
+
+```text
+http://127.0.0.1:8000/health
+http://127.0.0.1:8000/ready
+http://127.0.0.1:8000/metrics-lite
+```
 
 接口文档：
 
@@ -214,6 +233,26 @@ TRACE_INCLUDE_RAW_CONTENT=false
 ```
 
 `TRACE_ENABLED=true` 会把每次 `/api/chat` 的完整链路写入 `logs/traces/{trace_id}.json`。默认不保存原始用户输入全文，只记录脱敏用户标识、业务字段、span、event、attribute 和耗时摘要。
+
+第 11 阶段部署与稳定性配置：
+
+```bash
+READINESS_TIMEOUT_SECONDS=1.5
+METRICS_LITE_ENABLED=true
+METRICS_LITE_WINDOW_SIZE=200
+BUSINESS_SERVICE_RETRY_ATTEMPTS=2
+BUSINESS_SERVICE_RETRY_BACKOFF_MS=50
+BUSINESS_SERVICE_MAX_CONNECTIONS=20
+BUSINESS_SERVICE_MAX_KEEPALIVE_CONNECTIONS=10
+BUSINESS_SERVICE_CIRCUIT_BREAKER_ENABLED=true
+BUSINESS_SERVICE_CIRCUIT_FAILURE_THRESHOLD=3
+BUSINESS_SERVICE_CIRCUIT_RESET_SECONDS=30
+RAG_CACHE_ENABLED=true
+RAG_CACHE_TTL_SECONDS=300
+RAG_CACHE_MAX_SIZE=128
+```
+
+说明：`metrics-lite` 是单进程内存指标，适合本地部署验收；RAG 缓存只缓存公开知识库 sources，不缓存套餐、账单、工单等敏感业务结果。当前阶段不接 Prometheus、Grafana、OpenTelemetry Collector，也不声称支持生产级高并发。
 
 ## Redis 会话记忆与多轮上下文
 
@@ -564,6 +603,48 @@ evals/reports/latest_report.md
 ```
 
 面试讲解点：第 10 阶段展示的是本地可运行的观测和评测闭环，不声称支持生产级完整 APM、高并发观测、Prometheus、Grafana、OpenTelemetry Collector 或分布式链路追踪平台。
+
+## 性能优化与部署验收
+
+第 11 阶段重点是“部署感”和基础稳定性增强，不把本地 Demo 包装成生产级高并发系统。
+
+新增接口：
+
+| 接口 | 作用 |
+|---|---|
+| `GET /health` | 服务存活检查，只确认 FastAPI 进程可响应 |
+| `GET /ready` | 依赖就绪检查，覆盖 memory、业务服务、vector store、LLM、event producer 和 trace storage |
+| `GET /metrics-lite` | 进程内轻量指标，返回请求数、成功率、平均耗时和 P95 |
+
+部署验收命令：
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs ai-service
+```
+
+健康检查示例：
+
+```bash
+curl.exe "http://127.0.0.1:8000/health"
+curl.exe "http://127.0.0.1:8000/ready"
+curl.exe "http://127.0.0.1:8000/metrics-lite"
+```
+
+冒烟测试：
+
+```bash
+python scripts/smoke_test.py --base-url http://127.0.0.1:8000
+```
+
+小规模并发验证：
+
+```bash
+python scripts/simple_load_test.py --base-url http://127.0.0.1:8000 --scenario faq --concurrency 5 --total-requests 20
+```
+
+`simple_load_test.py` 只输出成功率、平均耗时、P95、P99 和少量错误样本，用于本地部署验证，不代表生产容量评估。
 
 ## 知识库入库
 
@@ -963,6 +1044,24 @@ curl -X POST "http://127.0.0.1:8000/api/chat" ^
 11. 新增 `evals/`，包含 JSONL 评测数据集、指标计算、评测脚本和 JSON/Markdown 报告输出。
 12. `.env.example` 新增 `TRACE_ENABLED`、`TRACE_STORAGE_DIR`、`TRACE_INCLUDE_RAW_CONTENT`。
 13. pytest 补充 trace、trace 回放接口和 eval 指标测试。
+
+## 第十一阶段已实现内容
+
+第十一阶段新增性能优化与部署能力：
+
+1. 新增 `app/health/`，集中实现存活检查和依赖就绪检查。
+2. 新增 `app/api/health.py`，提供 `GET /health`、`GET /ready` 和 `GET /metrics-lite`。
+3. `/ready` 检查 app、memory backend、business service、vector store、llm provider、event producer 和 trace storage。
+4. 新增 `app/observability/metrics.py`，提供进程内轻量指标，不接入 Prometheus。
+5. `HttpBusinessClient` 增加连接复用、连接池、可配置 retry/backoff 和简化 circuit breaker。
+6. RAG 检索新增轻量 TTL 缓存，只缓存公开知识库 sources，并在 trace 中记录 `cache_hit`。
+7. 新增根目录 `Dockerfile` 和 `.dockerignore`，保持 Python 3.11 slim 单阶段构建。
+8. 完善 `docker-compose.yml`，核心服务包括 `ai-service`、`mock-business-service` 和 `redis`，并增加 healthcheck、volume 和依赖就绪顺序。
+9. `mock_business_service` 新增 `/health`，用于 Compose 和 AI 服务 readiness 检查。
+10. 新增 `scripts/smoke_test.py`，用于部署后的健康检查和核心链路冒烟。
+11. 新增 `scripts/simple_load_test.py`，用于小规模并发验证并输出成功率、平均耗时、P95 和 P99。
+12. `.env.example` 新增 readiness、metrics-lite、BusinessClient 稳定性和 RAG cache 配置。
+13. pytest 补充 health、ready、cache，以及 BusinessClient 连接复用、retry、circuit breaker 测试。
 
 ## slots 设计
 

@@ -66,6 +66,68 @@ def test_http_business_client_handles_service_unavailable():
     assert exc_info.value.retriable is True
 
 
+def test_http_business_client_reuses_async_client_for_connection_pool():
+    client = _http_client()
+
+    async def scenario():
+        await client.query_user_package("u1001")
+        first_client = client._client
+        await client.query_bill("u1001", "本月")
+        return first_client
+
+    first_client = asyncio.run(scenario())
+    assert first_client is not None
+    assert client._client is first_client
+
+
+def test_http_business_client_retries_retriable_read_request():
+    calls = {"count": 0}
+
+    async def flaky_handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return httpx.Response(500, json={"detail": {"error_code": "TEMP", "message": "临时失败"}})
+        return httpx.Response(
+            200,
+            json={"package_name": "5G畅享套餐", "monthly_fee": 129, "data_quota": "60GB"},
+        )
+
+    client = HttpBusinessClient(
+        "http://business.test",
+        timeout_ms=800,
+        transport=httpx.MockTransport(flaky_handler),
+        retry_attempts=2,
+        retry_backoff_ms=1,
+    )
+
+    result = asyncio.run(client.query_user_package("u1001"))
+
+    assert result["package_name"] == "5G畅享套餐"
+    assert calls["count"] == 2
+
+
+def test_http_business_client_opens_simple_circuit_after_failures():
+    async def unavailable_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection failed", request=request)
+
+    client = HttpBusinessClient(
+        "http://business.test",
+        timeout_ms=800,
+        transport=httpx.MockTransport(unavailable_handler),
+        retry_attempts=1,
+        circuit_failure_threshold=1,
+        circuit_reset_seconds=30,
+    )
+
+    with pytest.raises(BusinessClientError) as first_error:
+        asyncio.run(client.query_user_package("u1001"))
+    with pytest.raises(BusinessClientError) as second_error:
+        asyncio.run(client.query_user_package("u1001"))
+
+    assert first_error.value.error_code == "BUSINESS_SERVICE_UNAVAILABLE"
+    assert second_error.value.error_code == "BUSINESS_CIRCUIT_OPEN"
+
+
 def test_mock_business_client_keeps_local_fallback_runnable():
     client = MockBusinessClient()
 
