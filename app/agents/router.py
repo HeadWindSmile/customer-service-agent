@@ -8,6 +8,7 @@ from app.agents.prompts import NO_SOURCE_ANSWER
 from app.audit import AuditLogger
 from app.auth.context import AuthContext
 from app.auth.rbac import ForbiddenError, Permission, PermissionChecker
+from app.observability.tracing import add_attribute, add_event, end_span, start_span
 from app.rag.retriever import KnowledgeRetriever
 from app.safety.guard import TOOL_PARAM_BLOCKED_ANSWER, SafetyGuard, SafetyViolation
 from app.safety.risk_level import SafetyAction
@@ -85,6 +86,13 @@ class CustomerRouter:
         auth_context = auth_context or self.permission_checker.build_self_context(user_id)
         effective_user_id = auth_context.effective_user_id
         handler = self.routes.get(intent_result.intent, self._handle_unknown)
+        add_event(
+            "router.selected",
+            {
+                "intent": intent_result.intent,
+                "handler": getattr(handler, "__name__", "unknown"),
+            },
+        )
         return await handler(
             intent_result,
             message,
@@ -444,9 +452,20 @@ class CustomerRouter:
         rewritten_query: str | None = None,
     ) -> RouteResult:
         search_query = rewritten_query or message
+        retrieve_span = start_span("rag.retrieve", {"scenario": scenario, "top_k": top_k})
         sources = self.retriever.search(search_query, top_k=top_k)
+        source_summary = {
+            "top_k": top_k,
+            "source_count": len(sources),
+            "doc_ids": [source.doc_id for source in sources],
+            "scores": [source.score for source in sources],
+        }
+        add_attribute("rag_retrieval", source_summary)
+        add_event("rag.retrieved", source_summary)
+        end_span(retrieve_span)
         if not sources:
             return RouteResult(answer=NO_SOURCE_ANSWER, rewritten_query=search_query)
+        answer_span = start_span("rag.answer", {"scenario": scenario, "source_count": len(sources)})
         answer = self.rag_answer_chain.generate(
             question=search_query,
             sources=sources,
@@ -455,6 +474,7 @@ class CustomerRouter:
             key_facts=key_facts or {},
             scenario=scenario,
         )
+        end_span(answer_span)
         return RouteResult(answer=answer, sources=sources, rewritten_query=search_query)
 
     async def _call_tool(
@@ -471,16 +491,77 @@ class CustomerRouter:
         resource_type: str = "business",
         audit_metadata: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], ToolCall]:
+        permission_value = required_permission.value if required_permission else None
+        tool_span = start_span(
+            "tool.call",
+            {
+                "tool_name": tool_name,
+                "permission": permission_value,
+                "intent": intent,
+            },
+        )
         started = elapsed_ms()
         permission_checked = False
-        permission_value = required_permission.value if required_permission else None
 
-        if auth_context and required_permission:
+        try:
+            if auth_context and required_permission:
+                try:
+                    self.permission_checker.require(auth_context, required_permission)
+                    permission_checked = True
+                except ForbiddenError as exc:
+                    denied_audit_logged = self.audit_logger.log_tool_action(
+                        trace_id=trace_id,
+                        auth_context=auth_context,
+                        action=audit_action or tool_name,
+                        permission=required_permission.value,
+                        intent=intent,
+                        tool_name=tool_name,
+                        resource_type=resource_type,
+                        allowed=False,
+                        success=False,
+                        reason=str(exc),
+                        metadata=audit_metadata or {},
+                    )
+                    add_event(
+                        "tool.permission_denied",
+                        {
+                            "tool_name": tool_name,
+                            "permission": permission_value,
+                            "audit_logged": denied_audit_logged,
+                        },
+                    )
+                    raise
+
+            tool_safety = self.safety_guard.scan_tool_params(input_data, trace_id=trace_id)
+            add_event(
+                "tool.safety_checked",
+                {
+                    "tool_name": tool_name,
+                    "risk_level": tool_safety.risk_level.value,
+                    "action": tool_safety.action.value,
+                    "finding_count": len(tool_safety.findings),
+                    "review_queued": tool_safety.review_queued,
+                },
+            )
+            if tool_safety.action != SafetyAction.ALLOW:
+                raise SafetyViolation(TOOL_PARAM_BLOCKED_ANSWER, tool_safety)
+
             try:
-                self.permission_checker.require(auth_context, required_permission)
-                permission_checked = True
-            except ForbiddenError as exc:
-                self.audit_logger.log_tool_action(
+                output = await func()
+                success = True
+                error_message = None
+            except BusinessClientError as exc:
+                output = exc.to_output()
+                success = False
+                error_message = exc.message
+            except Exception as exc:
+                output = {"error_code": "TOOL_CALL_FAILED", "message": str(exc)}
+                success = False
+                error_message = str(exc)
+
+            audit_logged = False
+            if auth_context and required_permission and self.permission_checker.should_audit(auth_context, required_permission):
+                audit_logged = self.audit_logger.log_tool_action(
                     trace_id=trace_id,
                     auth_context=auth_context,
                     action=audit_action or tool_name,
@@ -488,58 +569,37 @@ class CustomerRouter:
                     intent=intent,
                     tool_name=tool_name,
                     resource_type=resource_type,
-                    allowed=False,
-                    success=False,
-                    reason=str(exc),
-                    metadata=audit_metadata or {},
+                    allowed=True,
+                    success=success,
+                    reason=error_message or "",
+                    metadata={**(audit_metadata or {}), **_audit_metadata_from_output(output)},
                 )
-                raise
 
-        tool_safety = self.safety_guard.scan_tool_params(input_data, trace_id=trace_id)
-        if tool_safety.action != SafetyAction.ALLOW:
-            raise SafetyViolation(TOOL_PARAM_BLOCKED_ANSWER, tool_safety)
-
-        try:
-            output = await func()
-            success = True
-            error_message = None
-        except BusinessClientError as exc:
-            output = exc.to_output()
-            success = False
-            error_message = exc.message
-        except Exception as exc:
-            output = {"error_code": "TOOL_CALL_FAILED", "message": str(exc)}
-            success = False
-            error_message = str(exc)
-
-        audit_logged = False
-        if auth_context and required_permission and self.permission_checker.should_audit(auth_context, required_permission):
-            audit_logged = self.audit_logger.log_tool_action(
-                trace_id=trace_id,
-                auth_context=auth_context,
-                action=audit_action or tool_name,
-                permission=required_permission.value,
-                intent=intent,
+            call = ToolCall(
                 tool_name=tool_name,
-                resource_type=resource_type,
-                allowed=True,
+                input=self.safety_guard.sanitize_tool_payload(input_data),
+                output=self.safety_guard.sanitize_tool_payload(output),
                 success=success,
-                reason=error_message or "",
-                metadata={**(audit_metadata or {}), **_audit_metadata_from_output(output)},
+                latency_ms=elapsed_ms() - started,
+                error_message=error_message,
+                permission=permission_value,
+                permission_checked=permission_checked,
+                audit_logged=audit_logged,
             )
-
-        call = ToolCall(
-            tool_name=tool_name,
-            input=self.safety_guard.sanitize_tool_payload(input_data),
-            output=self.safety_guard.sanitize_tool_payload(output),
-            success=success,
-            latency_ms=elapsed_ms() - started,
-            error_message=error_message,
-            permission=permission_value,
-            permission_checked=permission_checked,
-            audit_logged=audit_logged,
-        )
-        return output, call
+            tool_result = {
+                "tool_name": tool_name,
+                "success": success,
+                "latency_ms": call.latency_ms,
+                "permission": permission_value,
+                "permission_checked": permission_checked,
+                "audit_logged": audit_logged,
+            }
+            if error_message:
+                tool_result["error_message"] = error_message
+            add_event("tool.called", tool_result)
+            return output, call
+        finally:
+            end_span(tool_span)
 
 
 def _audit_metadata_from_output(output: dict[str, Any]) -> dict[str, Any]:

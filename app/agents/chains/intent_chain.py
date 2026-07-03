@@ -8,6 +8,8 @@ from langchain_core.runnables import Runnable
 
 from app.agents.intent_schema import INTENT_DESCRIPTIONS, SLOT_DESCRIPTIONS, StructuredIntentResult, normalize_intent_name
 from app.llm.factory import create_llm_client
+from app.observability.llm_usage import record_llm_usage
+from app.observability.tracing import end_span, start_span
 
 
 INTENT_SYSTEM_PROMPT = """你是企业 AI 客服系统的意图识别器。
@@ -54,7 +56,15 @@ class IntentChain:
                 ("human", INTENT_USER_PROMPT),
             ]
         )
-        self.llm = llm or create_llm_client().as_runnable()
+        if llm is None:
+            llm_client = create_llm_client()
+            self.llm = llm_client.as_runnable()
+            self.llm_provider = llm_client.provider
+            self.model_name = llm_client.model_name
+        else:
+            self.llm = llm
+            self.llm_provider = "custom"
+            self.model_name = "custom-runnable"
         self.chain = self.prompt | self.llm | StrOutputParser()
 
     def classify(
@@ -65,17 +75,36 @@ class IntentChain:
         rule_slots: dict[str, Any],
         rule_reason: str,
     ) -> StructuredIntentResult:
-        raw_output = self.chain.invoke(
+        inputs = {
+            "intent_descriptions": _format_descriptions(INTENT_DESCRIPTIONS),
+            "slot_descriptions": _format_descriptions(SLOT_DESCRIPTIONS),
+            "rule_intent": rule_intent,
+            "rule_confidence": rule_confidence,
+            "rule_slots": json.dumps(rule_slots, ensure_ascii=False),
+            "rule_reason": rule_reason,
+            "message": message,
+        }
+        llm_span = start_span(
+            "llm.generate",
             {
-                "intent_descriptions": _format_descriptions(INTENT_DESCRIPTIONS),
-                "slot_descriptions": _format_descriptions(SLOT_DESCRIPTIONS),
-                "rule_intent": rule_intent,
-                "rule_confidence": rule_confidence,
-                "rule_slots": json.dumps(rule_slots, ensure_ascii=False),
-                "rule_reason": rule_reason,
-                "message": message,
-            }
+                "stage": "intent_classification",
+                "provider": self.llm_provider,
+                "model_name": self.model_name,
+            },
         )
+        try:
+            raw_output = self.chain.invoke(inputs)
+        except Exception as exc:
+            end_span(llm_span, error=str(exc))
+            raise
+        record_llm_usage(
+            provider=self.llm_provider,
+            model_name=self.model_name,
+            prompt_text=_usage_prompt_text(inputs),
+            completion_text=raw_output,
+            stage="intent_classification",
+        )
+        end_span(llm_span)
         payload = _loads_json_object(raw_output)
         payload["intent"] = normalize_intent_name(str(payload.get("intent", "unknown")))
         payload["slots"] = payload.get("slots") or {}
@@ -114,3 +143,9 @@ def _safe_confidence(value: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
     return max(0.0, min(confidence, 1.0))
+
+
+def _usage_prompt_text(inputs: dict[str, Any]) -> str:
+    """只为 token 粗估拼接，不落盘完整 prompt。"""
+
+    return "\n".join(f"{key}:{value}" for key, value in inputs.items())

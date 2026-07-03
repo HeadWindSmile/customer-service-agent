@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.api.chat import router as chat_router
+from app.api.traces import router as traces_router
 from app.config import settings
 
 
@@ -9,9 +10,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 9 阶段：RocketMQ 异步解耦与事件机制",
+        description="第 10 阶段：可观测性与 AI 效果评测体系",
     )
     app.include_router(chat_router)
+    app.include_router(traces_router)
     return app
 
 

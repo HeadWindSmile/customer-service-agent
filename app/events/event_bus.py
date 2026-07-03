@@ -7,6 +7,7 @@ from app.events.mock_producer import MockEventProducer
 from app.events.producer import BaseEventProducer, NoneEventProducer
 from app.events.rocketmq_producer import RocketMQProducer
 from app.observability.logger import log_event
+from app.observability.tracing import add_event, end_span, start_span
 
 
 class EventBus:
@@ -35,9 +36,26 @@ class EventBus:
             session_id=session_id,
             payload=payload or {},
         )
+        span = start_span(
+            "event.publish",
+            {
+                "event_type": event_type.value,
+                "producer_type": type(self.producer).__name__,
+            },
+        )
         try:
             sent = await self.producer.send(event)
         except Exception as exc:
+            add_event(
+                "event.publish_failed",
+                {
+                    "event_type": event_type.value,
+                    "publish_success": False,
+                    "producer_type": type(self.producer).__name__,
+                    "error": str(exc),
+                },
+            )
+            end_span(span, error=str(exc))
             log_event(
                 "event.publish_failed",
                 {
@@ -49,6 +67,15 @@ class EventBus:
             )
             return False
         if not sent:
+            add_event(
+                "event.publish_failed",
+                {
+                    "event_type": event_type.value,
+                    "publish_success": False,
+                    "producer_type": type(self.producer).__name__,
+                    "error": "producer returned false",
+                },
+            )
             log_event(
                 "event.publish_failed",
                 {
@@ -58,6 +85,16 @@ class EventBus:
                 },
                 level="warning",
             )
+        else:
+            add_event(
+                "event.publish_succeeded",
+                {
+                    "event_type": event_type.value,
+                    "publish_success": True,
+                    "producer_type": type(self.producer).__name__,
+                },
+            )
+        end_span(span)
         return sent
 
     async def publish_ticket_created(self, *, trace_id: str, user_id: str, session_id: str, payload: dict[str, Any]) -> bool:

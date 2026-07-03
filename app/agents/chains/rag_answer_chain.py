@@ -8,7 +8,9 @@ from langchain_core.runnables import Runnable
 from app.agents.prompts import NO_SOURCE_ANSWER, RAG_ANSWER_SYSTEM_PROMPT, RAG_ANSWER_USER_PROMPT
 from app.llm.factory import create_llm_client
 from app.llm.mock_llm import MockLLM
+from app.observability.llm_usage import record_llm_usage
 from app.observability.logger import log_event
+from app.observability.tracing import add_event, end_span, start_span
 from app.schemas.chat import Source
 
 
@@ -26,8 +28,17 @@ class RagAnswerChain:
                 ("human", RAG_ANSWER_USER_PROMPT),
             ]
         )
-        self.llm = llm or create_llm_client().as_runnable()
-        self.fallback_llm = MockLLM().as_runnable()
+        if llm is None:
+            llm_client = create_llm_client()
+            self.llm = llm_client.as_runnable()
+            self.llm_provider = llm_client.provider
+            self.model_name = llm_client.model_name
+        else:
+            self.llm = llm
+            self.llm_provider = "custom"
+            self.model_name = "custom-runnable"
+        self.fallback_client = MockLLM()
+        self.fallback_llm = self.fallback_client.as_runnable()
         self.parser = StrOutputParser()
         self.chain = self.prompt | self.llm | self.parser
         self.fallback_chain = self.prompt | self.fallback_llm | self.parser
@@ -55,11 +66,40 @@ class RagAnswerChain:
             "source_titles": "、".join(_unique_source_titles(sources)),
             "scenario": _scenario_instruction(scenario),
         }
+        prompt_text = _usage_prompt_text(inputs)
+        llm_span = start_span(
+            "llm.generate",
+            {
+                "stage": "rag_answer",
+                "provider": self.llm_provider,
+                "model_name": self.model_name,
+            },
+        )
         try:
-            return self.chain.invoke(inputs).strip()
+            answer = self.chain.invoke(inputs).strip()
+            record_llm_usage(
+                provider=self.llm_provider,
+                model_name=self.model_name,
+                prompt_text=prompt_text,
+                completion_text=answer,
+                stage="rag_answer",
+            )
+            end_span(llm_span)
+            return answer
         except Exception as exc:
             log_event("llm.generate_failed", {"scenario": scenario, "error": str(exc)}, level="error")
-            return self.fallback_chain.invoke(inputs).strip()
+            add_event("llm.fallback_to_mock", {"stage": "rag_answer", "error": str(exc)})
+            answer = self.fallback_chain.invoke(inputs).strip()
+            record_llm_usage(
+                provider=self.fallback_client.provider,
+                model_name=self.fallback_client.model_name,
+                prompt_text=prompt_text,
+                completion_text=answer,
+                stage="rag_answer",
+                fallback_used=True,
+            )
+            end_span(llm_span, error=str(exc))
+            return answer
 
 
 def _format_sources(sources: list[Source]) -> str:
@@ -112,3 +152,9 @@ def _scenario_instruction(scenario: str) -> str:
     if scenario == "package_recommend":
         return "套餐推荐场景：只能基于知识库说明给出选择建议，不要承诺用户一定可办理或一定更优惠。"
     return "知识库咨询场景：直接回答用户问题，保持简洁专业。"
+
+
+def _usage_prompt_text(inputs: dict[str, Any]) -> str:
+    """只为 token 估算拼接 prompt，不写入 trace，避免持久化完整用户内容。"""
+
+    return "\n".join(f"{key}:{value}" for key, value in inputs.items())
