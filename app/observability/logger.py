@@ -17,6 +17,7 @@ def log_event(event: str, payload: dict[str, Any], level: str = "info") -> None:
     message = json.dumps(record, ensure_ascii=False, default=str)
     if level == "error":
         logger.error(message)
+    elif level in {"warning", "warn"}:
+        logger.warning(message)
     else:
         logger.info(message)
-

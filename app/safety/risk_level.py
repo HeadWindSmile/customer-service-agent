@@ -73,6 +73,7 @@ class SafetyFinding:
 class SafetyResult:
     scope: str
     findings: list[SafetyFinding] = field(default_factory=list)
+    review_queued: bool = False
 
     @property
     def risk_level(self) -> RiskLevel:
@@ -97,5 +98,6 @@ class SafetyResult:
             "action": self.action.value,
             "allowed": self.allowed,
             "should_review": self.should_review,
+            "review_queued": self.review_queued,
             "findings": [finding.to_dict() for finding in self.findings],
         }

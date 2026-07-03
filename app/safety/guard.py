@@ -45,18 +45,18 @@ class SafetyGuard:
 
     def scan_input(self, message: str, *, trace_id: str = "") -> SafetyResult:
         result = self.rule_engine.scan(message, scope="input")
-        self._enqueue_if_needed(trace_id=trace_id, result=result, content=message)
+        result.review_queued = self._enqueue_if_needed(trace_id=trace_id, result=result, content=message)
         return result
 
     def scan_output(self, answer: str, *, trace_id: str = "") -> SafetyResult:
         result = self.rule_engine.scan(answer, scope="output")
-        self._enqueue_if_needed(trace_id=trace_id, result=result, content=answer)
+        result.review_queued = self._enqueue_if_needed(trace_id=trace_id, result=result, content=answer)
         return result
 
     def scan_tool_params(self, params: dict[str, Any], *, trace_id: str = "") -> SafetyResult:
         content = _flatten_for_detection(params)
         result = self.rule_engine.scan(content, scope="tool")
-        self._enqueue_if_needed(trace_id=trace_id, result=result, content=content)
+        result.review_queued = self._enqueue_if_needed(trace_id=trace_id, result=result, content=content)
         return result
 
     def sanitize_tool_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -65,9 +65,10 @@ class SafetyGuard:
     def sanitize_text(self, text: str) -> str:
         return sanitize_text(text)
 
-    def _enqueue_if_needed(self, *, trace_id: str, result: SafetyResult, content: str) -> None:
+    def _enqueue_if_needed(self, *, trace_id: str, result: SafetyResult, content: str) -> bool:
         if result.risk_level in {RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL}:
-            self.review_queue.enqueue(trace_id=trace_id, result=result, content=content)
+            return self.review_queue.enqueue(trace_id=trace_id, result=result, content=content)
+        return False
 
 
 def _flatten_for_detection(value: Any) -> str:

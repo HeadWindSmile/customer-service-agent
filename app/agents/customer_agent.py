@@ -1,9 +1,10 @@
 from app.agents.intent_classifier import IntentClassifier
 from app.agents.prompts import LOW_CONFIDENCE_ANSWER
 from app.agents.query_rewriter import QueryRewriter
-from app.agents.router import CustomerRouter
+from app.agents.router import CustomerRouter, RouteResult
 from app.auth.rbac import ForbiddenError, PermissionChecker
 from app.config import settings
+from app.events import EventBus
 from app.memory.factory import create_memory_store
 from app.memory.manager import ConversationMemoryManager
 from app.observability.logger import log_event
@@ -17,13 +18,14 @@ from app.utils.time import elapsed_ms
 class CustomerAgent:
     """主编排层串起权限、安全、意图、路由、记忆和观测，方便面试时讲清主链路。"""
 
-    def __init__(self) -> None:
+    def __init__(self, event_bus: EventBus | None = None) -> None:
         self.intent_classifier = IntentClassifier()
         self.memory = ConversationMemoryManager(create_memory_store())
         self.query_rewriter = QueryRewriter()
         self.safety_guard = SafetyGuard()
         self.router = CustomerRouter(safety_guard=self.safety_guard)
         self.permission_checker = PermissionChecker()
+        self.event_bus = event_bus or EventBus()
 
     async def handle(self, request: ChatRequest) -> ChatResponse:
         trace = TraceContext.new()
@@ -42,7 +44,8 @@ class CustomerAgent:
                 error = "SAFETY_INPUT_BLOCKED" if input_safety.action == SafetyAction.BLOCK else "SAFETY_REVIEW_REQUIRED"
                 trace.add_attribute("error", error)
                 log_event("chat.safety_blocked", trace.to_log_payload())
-                return ChatResponse(
+                await self._publish_safety_review_if_needed(request, trace.trace_id, input_safety)
+                response = ChatResponse(
                     answer=answer,
                     intent=intent,
                     slots=slots,
@@ -56,6 +59,8 @@ class CustomerAgent:
                     rewritten_query=rewritten_query,
                     safety_result={"input_safety": input_safety.to_dict()},
                 )
+                await self._publish_chat_finished(request, response, input_safety, output_safety)
+                return response
 
             memory_started = elapsed_ms()
             memory_context = await self.memory.load_context(request.user_id, request.session_id)
@@ -94,7 +99,8 @@ class CustomerAgent:
                 trace.add_attribute("fallback", "low_confidence")
                 trace.add_attribute("output_safety", output_safety.to_dict())
                 log_event("chat.low_confidence", trace.to_log_payload())
-                return ChatResponse(
+                await self._publish_safety_review_if_needed(request, trace.trace_id, output_safety)
+                response = ChatResponse(
                     answer=LOW_CONFIDENCE_ANSWER,
                     intent=intent,
                     slots=slots,
@@ -107,6 +113,8 @@ class CustomerAgent:
                     rewritten_query=rewritten_query,
                     safety_result=_safety_payload(input_safety, output_safety),
                 )
+                await self._publish_chat_finished(request, response, input_safety, output_safety)
+                return response
 
             # 路由
             route_result = await self.router.route(
@@ -122,11 +130,14 @@ class CustomerAgent:
             )
             output_safety = self.safety_guard.scan_output(route_result.answer, trace_id=trace.trace_id)
             trace.add_attribute("output_safety", output_safety.to_dict())
+            await self._publish_route_events(request, trace.trace_id, route_result)
+            await self._publish_audit_events(request, trace.trace_id)
+            await self._publish_safety_review_if_needed(request, trace.trace_id, output_safety)
             if output_safety.action != SafetyAction.ALLOW:
                 error = "SAFETY_OUTPUT_BLOCKED" if output_safety.action == SafetyAction.BLOCK else "SAFETY_REVIEW_REQUIRED"
                 trace.add_attribute("error", error)
                 log_event("chat.output_safety_blocked", trace.to_log_payload())
-                return ChatResponse(
+                response = ChatResponse(
                     answer=OUTPUT_BLOCKED_ANSWER,
                     intent=intent,
                     slots=slots,
@@ -140,6 +151,8 @@ class CustomerAgent:
                     rewritten_query=route_result.rewritten_query or rewritten_query,
                     safety_result=_safety_payload(input_safety, output_safety),
                 )
+                await self._publish_chat_finished(request, response, input_safety, output_safety)
+                return response
 
             memory_write_started = elapsed_ms()
             await self.memory.save_turn(
@@ -162,7 +175,7 @@ class CustomerAgent:
             trace.add_attribute("rbac_allowed", True)
             log_event("chat.completed", trace.to_log_payload())
 
-            return ChatResponse(
+            response = ChatResponse(
                 answer=route_result.answer,
                 intent=intent,
                 slots=slots,
@@ -175,13 +188,17 @@ class CustomerAgent:
                 rewritten_query=route_result.rewritten_query or rewritten_query,
                 safety_result=_safety_payload(input_safety, output_safety),
             )
+            await self._publish_chat_finished(request, response, input_safety, output_safety)
+            return response
         except SafetyViolation as exc:
             trace.add_attribute("error", str(exc))
             if exc.result is not None:
                 safety_key = "tool_param_safety" if exc.result.scope == "tool" else f"{exc.result.scope}_safety"
                 trace.add_attribute(safety_key, exc.result.to_dict())
             log_event("chat.safety_blocked", trace.to_log_payload())
-            return ChatResponse(
+            await self._publish_safety_review_if_needed(request, trace.trace_id, exc.result)
+            await self._publish_audit_events(request, trace.trace_id)
+            response = ChatResponse(
                 answer=str(exc),
                 intent=intent,
                 slots=slots,
@@ -195,11 +212,14 @@ class CustomerAgent:
                 rewritten_query=rewritten_query,
                 safety_result=_safety_payload(input_safety, output_safety, exc.result),
             )
+            await self._publish_chat_finished(request, response, input_safety, output_safety, exc.result)
+            return response
         except ForbiddenError as exc:
             trace.add_attribute("error", str(exc))
             trace.add_attribute("rbac_allowed", False)
             log_event("chat.blocked", trace.to_log_payload())
-            return ChatResponse(
+            await self._publish_audit_events(request, trace.trace_id)
+            response = ChatResponse(
                 answer=str(exc),
                 intent=intent,
                 slots=slots,
@@ -213,10 +233,13 @@ class CustomerAgent:
                 rewritten_query=rewritten_query,
                 safety_result=_safety_payload(input_safety, output_safety),
             )
+            await self._publish_chat_finished(request, response, input_safety, output_safety)
+            return response
         except Exception as exc:
             trace.add_attribute("error", str(exc))
             log_event("chat.failed", trace.to_log_payload(), level="error")
-            return ChatResponse(
+            await self._publish_audit_events(request, trace.trace_id)
+            response = ChatResponse(
                 answer="服务处理失败，请稍后再试或转人工客服。",
                 intent=intent,
                 slots=slots,
@@ -230,6 +253,96 @@ class CustomerAgent:
                 rewritten_query=rewritten_query,
                 safety_result=_safety_payload(input_safety, output_safety),
             )
+            await self._publish_chat_finished(request, response, input_safety, output_safety)
+            return response
+
+    async def _publish_route_events(self, request: ChatRequest, trace_id: str, route_result: RouteResult) -> None:
+        """发布工具调用产生的业务事件。
+
+        Router 继续只负责 intent 分发和工具调用，事件发送统一收口在主编排层，避免
+        tools 或 router 直接依赖 RocketMQ。
+        """
+
+        for call in route_result.tool_calls:
+            if call.tool_name == "create_ticket" and call.success:
+                await self.event_bus.publish_ticket_created(
+                    trace_id=trace_id,
+                    user_id=request.user_id,
+                    session_id=request.session_id,
+                    payload={
+                        "ticket_id": call.output.get("ticket_id"),
+                        "status": call.output.get("status"),
+                        "issue_type": call.output.get("issue_type") or call.input.get("issue_type"),
+                        "tool_latency_ms": call.latency_ms,
+                    },
+                )
+
+    async def _publish_audit_events(self, request: ChatRequest, trace_id: str) -> None:
+        audit_logger = getattr(self.router, "audit_logger", None)
+        if audit_logger is None or not hasattr(audit_logger, "drain_records"):
+            return
+        for record in audit_logger.drain_records(trace_id):
+            await self.event_bus.publish_audit_log_created(
+                trace_id=trace_id,
+                user_id=request.user_id,
+                session_id=request.session_id,
+                payload={
+                    "action": record.get("action"),
+                    "permission": record.get("permission"),
+                    "intent": record.get("intent"),
+                    "tool_name": record.get("tool_name"),
+                    "resource_type": record.get("resource_type"),
+                    "allowed": record.get("allowed"),
+                    "success": record.get("success"),
+                    "reason": record.get("reason"),
+                    "role": record.get("role"),
+                    "actor_user_id_masked": record.get("actor_user_id_masked"),
+                    "target_user_id_masked": record.get("target_user_id_masked"),
+                    "metadata": record.get("metadata") or {},
+                },
+            )
+
+    async def _publish_safety_review_if_needed(
+        self,
+        request: ChatRequest,
+        trace_id: str,
+        result: SafetyResult | None,
+    ) -> None:
+        if result is None or not result.review_queued:
+            return
+        await self.event_bus.publish_safety_review_required(
+            trace_id=trace_id,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            payload={
+                "scope": result.scope,
+                "risk_level": result.risk_level.value,
+                "action": result.action.value,
+                "risk_types": sorted({finding.risk_type for finding in result.findings}),
+                "finding_count": len(result.findings),
+            },
+        )
+
+    async def _publish_chat_finished(
+        self,
+        request: ChatRequest,
+        response: ChatResponse,
+        *safety_results: SafetyResult | None,
+    ) -> None:
+        await self.event_bus.publish_ai_qa_finished(
+            trace_id=response.trace_id,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            payload={
+                "intent": response.intent,
+                "latency_ms": response.latency_ms,
+                "tool_count": len(response.tool_calls),
+                "source_count": len(response.sources),
+                "safety_risk_level": _max_safety_risk_level(*safety_results),
+                "error": response.error,
+                "confidence": response.confidence,
+            },
+        )
 
 
 def _safety_payload(*results: SafetyResult | None) -> dict[str, object] | None:
@@ -240,3 +353,15 @@ def _safety_payload(*results: SafetyResult | None) -> dict[str, object] | None:
         key = "tool_param_safety" if result.scope == "tool" else f"{result.scope}_safety"
         payload[key] = result.to_dict()
     return payload or None
+
+
+def _max_safety_risk_level(*results: SafetyResult | None) -> str:
+    order = {"SAFE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+    level = "SAFE"
+    for result in results:
+        if result is None:
+            continue
+        value = result.risk_level.value
+        if order[value] > order[level]:
+            level = value
+    return level

@@ -9,7 +9,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 8 阶段：内容安全防护体系",
+        description="第 9 阶段：RocketMQ 异步解耦与事件机制",
     )
     app.include_router(chat_router)
     return app

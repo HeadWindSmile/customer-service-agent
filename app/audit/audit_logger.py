@@ -19,6 +19,8 @@ class AuditLogger:
     def __init__(self, log_path: str | None = None, enabled: bool | None = None) -> None:
         self.log_path = log_path or settings.audit_log_path
         self.enabled = settings.audit_log_enabled if enabled is None else enabled
+        # 保留已写入记录的短暂内存副本，方便编排层在不耦合审计模块和 MQ 的前提下发布事件。
+        self._written_records: list[dict[str, Any]] = []
 
     def log_tool_action(
         self,
@@ -64,6 +66,7 @@ class AuditLogger:
                 os.makedirs(parent, exist_ok=True)
             with open(self.log_path, "a", encoding="utf-8") as file:
                 file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            self._written_records.append(record)
             log_event(
                 "audit.logged",
                 {
@@ -79,6 +82,17 @@ class AuditLogger:
             # 审计写入失败不能拖垮客服主链路；真实生产可在这里接入备用队列。
             log_event("audit.write_failed", {"error": str(exc)}, level="error")
             return False
+
+    def drain_records(self, trace_id: str) -> list[dict[str, Any]]:
+        """取出指定 trace 的审计记录。
+
+        审计模块仍然只负责写审计日志；事件发布由 CustomerAgent 读取这些已落盘记录后完成，
+        避免 audit 层直接依赖 event schema 或 RocketMQ producer。
+        """
+
+        matched = [record for record in self._written_records if record.get("trace_id") == trace_id]
+        self._written_records = [record for record in self._written_records if record.get("trace_id") != trace_id]
+        return matched
 
 
 def _sanitize_value(value: Any) -> Any:
