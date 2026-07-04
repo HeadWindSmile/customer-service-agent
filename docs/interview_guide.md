@@ -12,6 +12,20 @@
 
 当前 Demo 默认用 mock/fallback，保证本地没有真实 LLM、Redis、RocketMQ、数据库也能启动。生产环境可以把这些边界替换为 Redis Cluster、Milvus、真实 RocketMQ 和 Prometheus，但当前 Demo 不夸大这些能力。
 
+## 如何解释生产项目与当前仓库差异
+
+推荐口径：
+
+> 简历里的项目是生产项目，真实接入了业务系统和外部基础设施；当前仓库是脱敏后按阶段复现的版本，已经实现了 AI 服务层、RAG、LCEL、Router、工具调用、RBAC、安全、事件和 trace 等核心架构。第 13 阶段开始我把简历成果和仓库能力逐项映射，后续按“真实接入优先，fallback 保底”的方式，把 Milvus、BGE、Reranker、RocketMQ、Offer/Order 和 Prometheus-compatible metrics 逐步接进来。
+
+回答时要把三类内容分开：
+
+1. 生产项目真实能力：可以讲真实线上架构、效果指标和业务价值。
+2. 当前仓库已实现能力：可以现场运行、用 curl、trace、eval 和 pytest 证明。
+3. 后续真实接入路线：说明当前仍是 mock/fallback/placeholder 的地方，以及哪一阶段补齐。
+
+不要把生产指标说成本地仓库自动跑出的结果，也不要把当前 `mock_business_service` 说成真实 Spring Boot 服务。更准确的讲法是：当前仓库已经复现了架构边界，后续阶段会逐步替换为真实外部系统，同时保留本地 fallback。
+
 ## 5 分钟详细讲解
 
 可以按这条主线讲：

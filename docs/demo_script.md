@@ -20,6 +20,18 @@ powershell -ExecutionPolicy Bypass -File scripts/dev_start.ps1
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 ```
 
+## 演示能力与真实接入边界
+
+当前脚本用于演示脱敏仓库中已经可运行的核心链路：RAG sources、业务 tool_calls、RBAC 审计、安全拦截、事件日志和 trace 回放。它能证明 AI 服务层和业务系统边界的工程设计，但不把本地 mock/fallback 说成真实生产依赖。
+
+面试时建议这样说明：
+
+1. 现场演示能力：`/api/chat`、RAG、LCEL、Router、Tools、Memory、RBAC、安全、EventBus、trace、eval。
+2. 当前 fallback 能力：MockLLM、MockEmbedding、MockVectorStore、MockBusinessClient、MockEventProducer、metrics-lite。
+3. 后续真实接入能力：第 14-18 阶段逐步补 Milvus、BGE、Reranker、RocketMQ、Offer/Order、Prometheus-compatible `/metrics`。
+
+如果面试官问简历中的生产指标，需要说明这些指标来自真实生产项目或生产评测体系，当前脚本只用于验证脱敏仓库的可运行链路和演示口径。
+
 ## 案例 1：用户咨询套餐规则
 
 ### curl 请求
@@ -230,4 +242,3 @@ sources = []
 ```
 
 解释：高风险 prompt injection 在输入阶段被拦截，不进入 LLM 和工具。
-

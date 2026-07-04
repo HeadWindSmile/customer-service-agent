@@ -47,6 +47,16 @@
 - [ ] 架构图使用 Mermaid 或 ASCII，不生成图片。
 - [ ] 文档没有把本地 Demo 描述成生产容量、真实 MQ、真实向量库或完整监控平台。
 
+## 简历映射自检
+
+- [ ] `docs/resume_mapping.md` 存在，并包含技术栈、职责、成果指标和第 14-18 阶段路线图。
+- [ ] 文档能区分生产项目真实能力、当前仓库已实现能力、mock/fallback/placeholder 边界和后续真实接入计划。
+- [ ] README 只提供简历映射入口，不重复堆砌长篇简历内容。
+- [ ] interview_guide 能解释生产项目与当前仓库差异。
+- [ ] demo_script 能说明哪些能力用于现场演示，哪些能力属于后续真实接入。
+- [ ] 没有把生产指标写成当前本地仓库的自动化测试结果。
+- [ ] 后续阶段如果真实接入 Milvus、BGE、RocketMQ、Offer/Order 或 `/metrics`，需要同步更新 resume_mapping、README 和面试话术。
+
 ## 测试检查
 
 ```bash

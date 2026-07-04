@@ -4,7 +4,7 @@
 
 这是一个用于 Agent 开发岗位面试展示的企业级 AI 客服问答系统 Demo。它不是普通 ChatBot，而是在原有 Java/Spring Boot 主业务系统旁边新增一层 Python/FastAPI AI 服务，模拟“业务微服务 + AI 服务层（LLM + Agent）”融合架构。
 
-当前已完成第 12 阶段：面试交付材料整理。项目默认本地模式不依赖真实 LLM、真实 RocketMQ、真实 Redis 或真实数据库，可以用 mock/fallback 跑通完整主链路。
+当前已完成第 13 阶段：简历成果映射与真实接入路线图。项目默认本地模式不依赖真实 LLM、真实 RocketMQ、真实 Redis 或真实数据库，可以用 mock/fallback 跑通完整主链路；后续阶段按“真实接入优先，fallback 保底”的原则逐步接入 Milvus、BGE、Reranker、RocketMQ、Offer/Order 和 Prometheus-compatible metrics。
 
 ## 背景痛点
 
@@ -280,6 +280,10 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 
 面试话术见 [docs/interview_guide.md](docs/interview_guide.md)。
 
+## 简历映射说明
+
+第 13 阶段新增 [docs/resume_mapping.md](docs/resume_mapping.md)，用于把简历中的生产项目能力、当前仓库已实现能力、mock/fallback/placeholder 边界和第 14-18 阶段真实接入路线逐项对齐。面试时建议先讲真实生产项目，再说明当前仓库是脱敏后的可运行复现版本，后续会按真实接入路线补齐外部系统。
+
 ## 项目阶段
 
 1. 最小可运行企业骨架
@@ -294,14 +298,22 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 10. 可观测性与 AI 效果评测体系
 11. 性能优化与部署
 12. 面试交付材料
+13. 简历成果映射与真实接入路线图
+14. RAG 真实检索增强：零宽断言分块、MMR、Reranker 抽象、BGE、Milvus
+15. AI 评测体系增强：TopK、幻觉、意图、工具、安全、延迟、Token 成本
+16. Offer / Order 业务域增强
+17. 性能与可观测性增强：Prometheus-compatible `/metrics`、性能报告、trace latency
+18. 最终面试演示闭环
 
 ## 后续可扩展方向
 
-这些是生产环境可扩展方向，不代表当前 Demo 已真实接入：
+这些是后续真实接入方向，不代表当前本地模式已经默认连接外部系统：
 
 1. Redis Cluster 替换单机 Redis 或 memory fallback。
 2. Milvus 或企业向量库替换本地 mock/chroma vector store。
 3. 真实 RocketMQ Producer 替换当前 placeholder。
 4. Prometheus、Grafana、OpenTelemetry Collector 接入完整监控链路。
 5. 真实安全审核模型替换 Mock 语义检测。
-6. 更完整的离线评测、在线反馈和人工审核后台。
+6. BGE Embedding、MMR 和 BGE-Reranker 补齐生产 RAG 优化链路。
+7. Offer / Order 等业务域通过业务微服务 API 接入，不让 AI 服务直连业务库。
+8. 更完整的离线评测、在线反馈和人工审核后台。

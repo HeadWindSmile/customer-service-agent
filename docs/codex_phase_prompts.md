@@ -47,6 +47,12 @@
 | 第 10 阶段 | 可观测性与评测体系 | trace_id、CallbackHandler、latency、token 成本、准确率、幻觉率评测 |
 | 第 11 阶段 | 性能优化与部署 | Docker Compose、健康检查、连接池、缓存、压测脚本 |
 | 第 12 阶段 | 面试交付材料 | README、架构图说明、接口文档、测试用例、面试讲解稿 |
+| 第 13 阶段 | 简历成果映射与真实接入路线图 | 对齐简历生产项目能力、当前仓库证据、mock/fallback 边界和第 14-18 阶段真实接入路线 |
+| 第 14 阶段 | RAG 真实检索增强 | 零宽断言分块、MMR、多候选召回、Reranker 抽象、BGE provider、Milvus 真实适配 |
+| 第 15 阶段 | AI 评测体系增强 | Top1/Top3/TopK、幻觉、意图、工具、安全、延迟、Token 成本多维评测 |
+| 第 16 阶段 | Offer / Order 业务域增强 | 新增商品 offer、订单 order 业务工具与业务服务契约 |
+| 第 17 阶段 | 性能与可观测性增强 | Prometheus-compatible `/metrics`、性能报告、trace latency 字段、压测报告模板 |
+| 第 18 阶段 | 最终面试演示闭环 | 统一 README、简历映射、演示脚本、评测报告、压测报告和讲解口径 |
 
 ---
 
@@ -1584,6 +1590,161 @@ README 增加：
 
 ---
 
+# 第 13 阶段：简历成果映射与真实接入路线图
+
+## 阶段目标
+
+把简历中的生产项目经历和当前仓库逐项映射，明确当前仓库已经实现什么、哪些仍是 mock/fallback/placeholder、哪些需要在第 14-18 阶段真实接入。
+
+本阶段不改业务主链路，不新增环境变量，不生成前端页面。重点是建立后续真实接入路线图，避免后续开发偏离简历内容。
+
+## 验收标准
+
+1. 新增 `docs/resume_mapping.md`。
+2. README 增加简历映射入口，但不失控变长。
+3. interview_guide 能解释生产项目与当前仓库差异。
+4. demo_script 能说明现场演示能力和后续真实接入能力。
+5. checklist 增加简历映射自检。
+6. pytest 能检查文档存在、章节完整和禁止夸大表述。
+
+## 给 Codex 的提示词
+
+```text
+请在当前代码基础上，增量实现第十三阶段：简历成果映射与真实接入路线图。
+
+目标：
+不是只做 Demo 边界说明，而是把我的简历生产项目能力和当前仓库逐项对齐，并明确第 14-18 阶段如何真实接入 Milvus、BGE、Reranker、RocketMQ、Offer/Order 和 Prometheus-compatible metrics。
+
+要求一：新增 docs/resume_mapping.md
+必须包含：
+1. 简历项目概述
+2. 当前仓库与简历能力总览
+3. 技术栈映射表
+4. 核心职责映射表
+5. 成果指标映射表
+6. 当前已实现能力
+7. 当前 mock / fallback / placeholder 能力
+8. 需要真实接入的能力清单
+9. 当前仓库与真实生产项目差距
+10. 面试讲解口径
+11. 禁止夸大说明
+12. 第 14-18 阶段真实接入路线图
+
+要求二：更新现有文档
+1. README 增加简历映射入口。
+2. docs/interview_guide.md 增加“如何解释生产项目与当前仓库差异”。
+3. docs/demo_script.md 增加“演示能力与真实接入边界”。
+4. docs/checklist.md 增加“简历映射自检”。
+5. docs/codex_phase_prompts.md 追加第 13-18 阶段规划。
+
+要求三：测试
+补充 pytest 文档测试：
+1. 验证 docs/resume_mapping.md 存在且章节完整。
+2. 验证 README、interview_guide、demo_script、checklist 有简历映射入口。
+3. 验证文档不会把当前仓库描述成已经连接真实 Milvus、RocketMQ、Redis Cluster、Prometheus/Grafana 或支持生产级高并发。
+4. 验证第 14-18 阶段真实接入路线存在。
+
+特别要求：
+1. 本阶段原则上不改 app/ 业务代码。
+2. 不新增环境变量。
+3. 不生成前端页面。
+4. 文档中必须体现“真实接入优先，fallback 保底”。
+5. 不能把生产项目指标写成当前本地仓库自动化测试结果。
+
+通用开发约束：
+1. 必须基于当前已有代码增量开发，不要推翻重写整个项目。
+2. 不要把业务逻辑写到 main.py 或 api 层，必须保持分层清晰。
+3. 每个新增模块必须有必要注释，注释重点解释“为什么这样设计”。
+4. 每个阶段完成后必须更新 README 的“当前阶段能力”和“启动方式”。
+5. 每个阶段必须提供至少 3 个可运行 curl 示例。
+6. 每个阶段必须补充或更新 pytest 测试。
+7. 代码必须真实可运行，不要写伪代码。
+8. 出现外部依赖时，必须提供 mock/fallback 模式，保证本地最小版本仍能启动。
+9. 如果需要新增环境变量，必须同步更新 .env.example。
+10. 不要生成前端。
+```
+
+---
+
+# 第 14 阶段：RAG 真实检索增强
+
+## 阶段目标
+
+把当前基础 RAG 链路升级为更贴近简历生产项目的检索链路：零宽断言句末分块、MMR 多样性召回、BGE Embedding provider、Reranker 抽象和 Milvus 真实适配。
+
+## 验收标准
+
+1. `app/rag/splitter.py` 支持零宽断言句末分块，并保留 section metadata。
+2. `app/rag/vector_store.py` 提供可配置的真实 Milvus 适配，Milvus 不可用时 fallback。
+3. 新增 MMR 检索或重排工具函数。
+4. 新增 Reranker 抽象，默认 mock，可配置 BGE-Reranker。
+5. trace 中记录 candidate_count、top_k、reranker_used、vector_store_type。
+6. README 和 resume_mapping 同步说明真实接入进度。
+
+---
+
+# 第 15 阶段：AI 评测体系增强
+
+## 阶段目标
+
+把第 10 阶段的基础 eval 扩展为更贴近简历指标的评测体系，覆盖 Top1/Top3/TopK、召回覆盖、幻觉、意图、工具、安全、延迟和 Token 成本。
+
+## 验收标准
+
+1. eval dataset 支持 expected_sources、expected_top_k、expected_rerank。
+2. metrics 支持 Top1、Top3、TopK、source coverage、hallucination、intent、tool、safety、latency、token cost。
+3. report 输出 JSON 和 Markdown，并区分本地评测指标与生产项目指标。
+4. README 和 resume_mapping 同步更新评测口径。
+
+---
+
+# 第 16 阶段：Offer / Order 业务域增强
+
+## 阶段目标
+
+补齐简历中的商品 offer、订单 order 基础业务模块。AI 服务仍通过 BusinessClient 调用业务系统 API，不直接访问 MySQL。
+
+## 验收标准
+
+1. mock_business_service 新增 offer/order 内部 API。
+2. app/tools 新增 OfferTool、OrderTool 或同等边界。
+3. Router 增加 offer_query、offer_recommend、order_query 等必要意图。
+4. RBAC、审计、tool safety、tool_calls 和 trace 完整覆盖新增业务域。
+5. README、demo_script、resume_mapping 同步新增业务案例。
+
+---
+
+# 第 17 阶段：性能与可观测性增强
+
+## 阶段目标
+
+增强本地可观测性和性能报告能力，为真实监控平台接入做准备，但不默认依赖 Prometheus/Grafana/OTel Collector。
+
+## 验收标准
+
+1. 新增 Prometheus-compatible `/metrics` 文本接口。
+2. trace 中补齐关键 latency 字段，包括 intent、rag、llm、tool、memory、event。
+3. simple_load_test 输出性能报告 JSON/Markdown。
+4. README 和 interview_guide 说明本地压测不是生产容量承诺。
+
+---
+
+# 第 18 阶段：最终面试演示闭环
+
+## 阶段目标
+
+把第 1-17 阶段整理成最终面试交付包：代码、文档、演示脚本、评测报告、压测报告和简历口径完全一致。
+
+## 验收标准
+
+1. README、resume_mapping、interview_guide、demo_script、checklist 完全同步。
+2. 至少 5 个核心 curl 案例覆盖 RAG、Tools、Memory、RBAC、安全、事件和 trace。
+3. eval 和 load report 可生成并被文档引用。
+4. pytest、smoke_test、eval、demo_check 均可运行。
+5. 文档能清楚区分生产项目真实能力、当前仓库已实现能力和本地 fallback 边界。
+
+---
+
 ## 四、推荐执行顺序
 
 严格按顺序执行：
@@ -1601,6 +1762,12 @@ README 增加：
 第 10 阶段：补 trace 和评测
 第 11 阶段：补部署、健康检查、压测
 第 12 阶段：补面试文档和演示脚本
+第 13 阶段：补简历成果映射和真实接入路线图
+第 14 阶段：补 RAG 真实检索增强
+第 15 阶段：补 AI 评测体系增强
+第 16 阶段：补 Offer / Order 业务域
+第 17 阶段：补性能与可观测性增强
+第 18 阶段：补最终面试演示闭环
 ```
 
 不要跳阶段。每个阶段完成后先做三件事：

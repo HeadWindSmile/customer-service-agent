@@ -13,6 +13,7 @@ REQUIRED_DOCS = [
     "docs/security_design.md",
     "docs/observability_design.md",
     "docs/deployment_design.md",
+    "docs/resume_mapping.md",
     "docs/interview_guide.md",
     "docs/demo_script.md",
     "docs/checklist.md",
@@ -66,11 +67,13 @@ def test_readme_is_interview_project_guide():
         "## 验收命令",
         "## Demo 案例",
         "## 面试讲解点",
+        "## 简历映射说明",
     ]
     for section in required_sections:
         assert section in content
     assert "不是普通 ChatBot" in content
     assert "mock/fallback" in content
+    assert "docs/resume_mapping.md" in content
 
 
 def test_interview_guide_covers_required_talking_points():
@@ -88,6 +91,7 @@ def test_interview_guide_covers_required_talking_points():
         "RocketMQ placeholder 怎么讲",
         "trace/eval 怎么讲",
         "性能优化与部署怎么讲",
+        "如何解释生产项目与当前仓库差异",
         "项目难点怎么讲",
         "面试官追问与参考回答",
     ]
@@ -111,6 +115,32 @@ def test_demo_script_has_five_business_cases_and_verification_points():
         assert keyword in content
     for observable in ["trace_id", "logs/audit.log", "logs/events.jsonl", "safety_result"]:
         assert observable in content
+    assert "演示能力与真实接入边界" in content
+    assert "后续真实接入能力" in content
+
+
+def test_resume_mapping_covers_phase13_alignment_and_real_integration_roadmap():
+    content = _read("docs/resume_mapping.md")
+    required_sections = [
+        "## 简历项目概述",
+        "## 当前仓库与简历能力总览",
+        "## 技术栈映射表",
+        "## 核心职责映射表",
+        "## 成果指标映射表",
+        "## 当前已实现能力",
+        "## 当前 mock / fallback / placeholder 能力",
+        "## 需要真实接入的能力清单",
+        "## 当前仓库与真实生产项目差距",
+        "## 面试讲解口径",
+        "## 禁止夸大说明",
+        "## 第 14-18 阶段真实接入路线图",
+        "## 第 13 阶段验收口径",
+    ]
+    for section in required_sections:
+        assert section in content
+    for keyword in ["Milvus", "BGE", "Reranker", "RocketMQ", "Offer / Order", "Prometheus-compatible"]:
+        assert keyword in content
+    assert "真实接入优先，fallback 保底" in content
 
 
 def test_mermaid_diagrams_are_present_in_delivery_docs():
@@ -149,6 +179,21 @@ def test_docs_do_not_overstate_demo_capabilities():
         "完整 Prometheus/Grafana/OTel 已接入",
         "真实 RocketMQ 已接入",
         "真实 Milvus 已接入",
+        "当前仓库已连接真实 Milvus",
+        "当前仓库已连接真实 RocketMQ",
+        "当前仓库已连接 Redis Cluster",
+        "当前仓库已连接 Prometheus",
+        "当前仓库支持 5 万并发",
     ]
     for phrase in forbidden_phrases:
         assert phrase not in combined
+
+
+def test_phase13_docs_keep_resume_mapping_entrypoints_consistent():
+    assert "简历映射说明" in _read("README.md")
+    assert "如何解释生产项目与当前仓库差异" in _read("docs/interview_guide.md")
+    assert "演示能力与真实接入边界" in _read("docs/demo_script.md")
+    assert "简历映射自检" in _read("docs/checklist.md")
+    prompts = _read("docs/codex_phase_prompts.md")
+    for stage in ["第 13 阶段", "第 14 阶段", "第 15 阶段", "第 16 阶段", "第 17 阶段", "第 18 阶段"]:
+        assert stage in prompts
