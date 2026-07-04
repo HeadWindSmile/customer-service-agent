@@ -21,6 +21,32 @@ def test_http_business_client_queries_package_through_internal_api():
     assert result["monthly_fee"] == 129
 
 
+def test_http_business_client_queries_offers_through_internal_api():
+    client = _http_client()
+
+    result = asyncio.run(client.query_available_offers("u1001"))
+
+    assert result["offers"]
+    assert result["offers"][0]["offer_id"].startswith("OFF-")
+
+
+def test_http_business_client_recommends_offers_through_internal_api():
+    client = _http_client()
+
+    result = asyncio.run(client.recommend_offers("u1001", need="流量不够用", budget=20))
+
+    assert result["offers"][0]["offer_id"] == "OFF-DATA-20G"
+
+
+def test_http_business_client_queries_order_through_internal_api():
+    client = _http_client()
+
+    result = asyncio.run(client.query_order("u1001", "ORD-20260701001"))
+
+    assert result["order_id"] == "ORD-20260701001"
+    assert result["status"] == "processing"
+
+
 def test_http_business_client_maps_business_404_to_client_error():
     client = _http_client()
 
@@ -134,3 +160,13 @@ def test_mock_business_client_keeps_local_fallback_runnable():
     result = asyncio.run(client.query_bill("u1001", "本月"))
 
     assert result["amount"] == 156.8
+
+
+def test_mock_business_client_supports_phase16_offer_and_order_fallback():
+    client = MockBusinessClient()
+
+    offers = asyncio.run(client.recommend_offers("u1001", need="流量不够用", budget=20))
+    order = asyncio.run(client.query_order("u1001", "ORD-20260701001"))
+
+    assert offers["offers"][0]["offer_id"] == "OFF-DATA-20G"
+    assert order["order_id"] == "ORD-20260701001"

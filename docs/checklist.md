@@ -55,7 +55,7 @@
 - [ ] interview_guide 能解释生产项目与当前仓库差异。
 - [ ] demo_script 能说明哪些能力用于现场演示，哪些能力属于后续真实接入。
 - [ ] 没有把生产指标写成当前本地仓库的自动化测试结果。
-- [ ] 后续阶段如果真实接入 Milvus、BGE、RocketMQ、Offer/Order 或 `/metrics`，需要同步更新 resume_mapping、README 和面试话术。
+- [ ] 后续阶段如果真实接入 Milvus、BGE、RocketMQ 或 `/metrics`，需要同步更新 resume_mapping、README 和面试话术。
 
 ## 第 14 阶段 RAG 检索增强自检
 
@@ -79,6 +79,19 @@
 - [ ] 报告明确区分“本地 Demo 评测结果”和“生产项目指标口径”。
 - [ ] pytest 覆盖 metrics、dataset 加载和 report 输出。
 - [ ] 文档没有把生产 TopK、幻觉率、延迟或成本指标写成本地 Demo 结果。
+
+## 第 16 阶段 Offer / Order 业务域增强自检
+
+- [ ] `offer_query`、`offer_recommend`、`order_query` 已进入 intent 白名单和 Router 注册表。
+- [ ] `OfferTool`、`OrderTool` 只通过 `BusinessClient` 调用业务能力，不直接读取 mock 数据。
+- [ ] `MockBusinessClient` 和 `HttpBusinessClient` 都支持 offer/order 方法。
+- [ ] `mock_business_service` 提供 offer/order mock 数据和内部 HTTP API。
+- [ ] 普通用户只能查询自己的 Offer/Order。
+- [ ] 客服代查订单必须提供 `target_user_id`，并写入审计日志。
+- [ ] `tool_calls` 包含 tool_name、input、output、success、latency_ms、permission、permission_checked、audit_logged。
+- [ ] 工具参数继续经过 safety scan，响应和审计中的用户标识会脱敏。
+- [ ] `/api/chat` 至少能跑通查询可办理优惠、推荐 offer、查询订单状态 3 个示例。
+- [ ] 文档明确说明当前是基础业务域接入，不声称支持生产级订单交易能力。
 
 ## 测试检查
 

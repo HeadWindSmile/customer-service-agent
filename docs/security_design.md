@@ -35,7 +35,21 @@ flowchart TB
 PACKAGE_QUERY_SELF, PACKAGE_QUERY_AGENT,
 BILL_QUERY_SELF, BILL_QUERY_AGENT,
 TICKET_CREATE_SELF, TICKET_CREATE_AGENT
+OFFER_QUERY_SELF, OFFER_QUERY_AGENT,
+OFFER_RECOMMEND_SELF, OFFER_RECOMMEND_AGENT,
+ORDER_QUERY_SELF, ORDER_QUERY_AGENT
 ```
+
+第 16 阶段新增 Offer / Order 权限边界：
+
+| 权限 | 说明 |
+|---|---|
+| `OFFER_QUERY_SELF` | 用户查询自己可办理优惠/权益 |
+| `OFFER_QUERY_AGENT` | 客服代用户查询可办理优惠/权益，需 `target_user_id` |
+| `OFFER_RECOMMEND_SELF` | 用户根据自身诉求获取 offer 推荐 |
+| `OFFER_RECOMMEND_AGENT` | 客服代用户推荐 offer，需审计 |
+| `ORDER_QUERY_SELF` | 用户查询自己订单状态，属于敏感业务数据 |
+| `ORDER_QUERY_AGENT` | 客服代用户查询订单，必须 RBAC 校验和审计 |
 
 ## 审计日志
 
@@ -48,6 +62,8 @@ tool_name, resource_type, allowed, success, reason, metadata
 ```
 
 审计日志会脱敏用户标识、手机号、身份证、银行卡、邮箱等字段。
+
+订单查询默认纳入敏感操作；客服代查 Offer/Order 也会写入审计。Offer 推荐本身不创建订单，AI 服务只展示业务系统返回的可办理权益，不承诺办理成功。
 
 ## 内容安全
 
@@ -76,4 +92,3 @@ tool_name, resource_type, allowed, success, reason, metadata
 可以这样解释：
 
 > 这个项目不把安全当成一个敏感词函数，而是把输入、工具参数、输出都纳入安全链路。高风险内容不会进入 LLM 或业务工具；业务敏感操作还会走 RBAC 和审计。这样更接近企业客服场景。
-

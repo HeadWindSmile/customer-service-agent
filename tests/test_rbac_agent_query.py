@@ -69,3 +69,48 @@ def test_admin_can_change_package_for_target_user():
         assert call.audit_logged is True
 
     asyncio.run(scenario())
+
+
+def test_agent_can_query_target_order_with_audit():
+    async def scenario():
+        agent = CustomerAgent()
+        response = await agent.handle(
+            ChatRequest(
+                user_id="agent001",
+                session_id="rbac-agent-order",
+                role="agent",
+                target_user_id="u1001",
+                message="帮客户查订单 ORD-20260701001 的状态",
+            )
+        )
+
+        assert response.error is None
+        call = response.tool_calls[0]
+        assert call.input["user_id"] == "u***1"
+        assert call.permission == "ORDER_QUERY_AGENT"
+        assert call.permission_checked is True
+        assert call.audit_logged is True
+
+    asyncio.run(scenario())
+
+
+def test_agent_can_recommend_offer_for_target_user_with_audit():
+    async def scenario():
+        agent = CustomerAgent()
+        response = await agent.handle(
+            ChatRequest(
+                user_id="agent001",
+                session_id="rbac-agent-offer",
+                role="agent",
+                target_user_id="u1001",
+                message="帮客户推荐一个流量优惠",
+            )
+        )
+
+        assert response.error is None
+        call = response.tool_calls[0]
+        assert call.tool_name == "recommend_offers"
+        assert call.permission == "OFFER_RECOMMEND_AGENT"
+        assert call.audit_logged is True
+
+    asyncio.run(scenario())

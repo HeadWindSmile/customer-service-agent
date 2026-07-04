@@ -32,6 +32,15 @@ trace 中包含：
 8. input/output/tool safety 结果。
 9. event publish 结果。
 
+第 16 阶段新增的 Offer / Order 工具继续写入同一套 `tool_calls` 和 trace 字段：
+
+```text
+query_available_offers, recommend_offers,
+query_order, query_recent_orders
+```
+
+订单查询会在 trace 中体现 `permission=ORDER_QUERY_SELF/ORDER_QUERY_AGENT`、`audit_logged` 和工具耗时，方便复盘客服代查是否经过合规链路。
+
 ## Trace 回放
 
 每次请求会写入：

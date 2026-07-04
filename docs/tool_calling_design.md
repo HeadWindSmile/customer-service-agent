@@ -35,6 +35,8 @@ sequenceDiagram
 | `BillTool` | 查询账单 |
 | `TicketTool` | 创建工单、查询工单 |
 | `UserTool` | 查询用户资料 |
+| `OfferTool` | 查询可办理优惠/权益、根据诉求推荐 offer |
+| `OrderTool` | 查询指定订单状态、查询最近订单 |
 
 ## BusinessClient 抽象
 
@@ -48,6 +50,30 @@ sequenceDiagram
 1. AI 服务不拥有业务数据和事务。
 2. 未来替换成真实 Spring Boot 服务时，不需要改 Router 或 Tool 的调用方式。
 3. 本地最小模式不依赖业务服务也能演示。
+
+## 第 16 阶段 Offer / Order 契约
+
+第 16 阶段新增的业务域继续沿用同一条边界：Router 调用 Tool，Tool 只委托 `BusinessClient`，`BusinessClient` 再选择 HTTP 或本地 fallback。
+
+新增内部 HTTP 契约：
+
+```text
+GET  /internal/users/{user_id}/offers
+POST /internal/users/{user_id}/offers/recommend
+GET  /internal/users/{user_id}/orders/{order_id}
+GET  /internal/users/{user_id}/orders?limit=3
+```
+
+新增工具调用名：
+
+```text
+query_available_offers
+recommend_offers
+query_order
+query_recent_orders
+```
+
+Offer 的可办理资格、推荐排序、权益有效期属于业务系统职责，AI 服务只负责把用户诉求转成受控工具参数。Order 查询属于敏感业务数据，必须经过 RBAC 和审计。
 
 ## tool_calls 字段
 
@@ -77,4 +103,3 @@ error_message, permission, permission_checked, audit_logged
 2. AI 服务不直接操作业务数据库。
 3. 工具调用参数要做安全检测。
 4. 业务失败要结构化返回，不能把底层异常直接暴露给用户。
-

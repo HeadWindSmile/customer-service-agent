@@ -28,7 +28,7 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 
 1. 现场演示能力：`/api/chat`、RAG、LCEL、Router、Tools、Memory、RBAC、安全、EventBus、trace、eval。
 2. 当前 fallback 能力：MockLLM、MockEmbedding、MockVectorStore、MockBusinessClient、MockEventProducer、metrics-lite。
-3. 后续真实接入能力：第 14 阶段已补 Milvus、BGE、Reranker 的可配置接入点和 fallback；第 15-18 阶段继续补评测报告、RocketMQ、Offer/Order、Prometheus-compatible `/metrics`。
+3. 后续真实接入能力：第 14 阶段已补 Milvus、BGE、Reranker 的可配置接入点和 fallback；第 16 阶段已补 Offer/Order 基础业务域；后续继续补 RocketMQ 真实 SDK 和 Prometheus-compatible `/metrics`。
 
 如果面试官问简历中的生产指标，需要说明这些指标来自真实生产项目或生产评测体系，当前脚本只用于验证脱敏仓库的可运行链路和演示口径。
 
@@ -225,6 +225,66 @@ CustomerAgent -> AuthContext(role=agent,target_user_id=u1002)
 ### 面试解释
 
 这个案例展示企业客服最关键的合规边界：客服可以代查，但必须明确目标用户、检查权限、写审计日志并脱敏。
+
+## 案例 6：Offer / Order 业务域增强
+
+### 查询可办理优惠/权益
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"u1001\",\"session_id\":\"demo-offer-query\",\"role\":\"user\",\"message\":\"我有哪些可办理优惠权益？\"}"
+```
+
+预期：
+
+```text
+intent = offer_query
+tool_calls[0].tool_name = query_available_offers
+tool_calls[0].permission = OFFER_QUERY_SELF
+sources = []
+```
+
+### 根据诉求推荐 Offer
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"u1001\",\"session_id\":\"demo-offer-recommend\",\"role\":\"user\",\"message\":\"我流量不够，预算20元以内，推荐一个优惠\"}"
+```
+
+预期：
+
+```text
+intent = offer_recommend
+tool_calls[0].tool_name = recommend_offers
+tool_calls[0].success = true
+answer 包含流量优惠推荐
+```
+
+### 客服代查订单状态
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"agent001\",\"session_id\":\"demo-agent-order\",\"role\":\"agent\",\"target_user_id\":\"u1001\",\"message\":\"帮客户查订单 ORD-20260701001 的状态\"}"
+```
+
+预期：
+
+```text
+intent = order_query
+tool_calls[0].tool_name = query_order
+tool_calls[0].permission = ORDER_QUERY_AGENT
+tool_calls[0].audit_logged = true
+```
+
+### 经过模块
+
+```text
+CustomerAgent -> IntentClassifier -> AuthContext
+-> CustomerRouter -> PermissionChecker
+-> SafetyGuard.scan_tool_params -> OfferTool/OrderTool
+-> BusinessClient -> AuditLogger -> trace
+```
+
+### 面试解释
+
+这个案例说明第 16 阶段把 Offer 和 Order 作为真实业务域接入边界，而不是让模型自由生成优惠或订单状态。AI 服务只调用业务 API，订单代查必须经过 RBAC 和审计。
 
 ## 可选安全演示
 

@@ -73,3 +73,32 @@ def test_audit_logger_sanitizes_sensitive_metadata(tmp_path):
     assert "110101199001011234" not in content
     assert "138****5678" in content
     assert "身份证号已脱敏" in content
+
+
+def test_agent_order_query_writes_masked_audit_log(tmp_path):
+    async def scenario():
+        log_path = tmp_path / "audit.log"
+        agent = _agent_with_audit_log(log_path)
+        response = await agent.handle(
+            ChatRequest(
+                user_id="agent001",
+                session_id="audit-agent-order",
+                role="agent",
+                target_user_id="u1001",
+                message="帮客户查订单 ORD-20260701001 的状态",
+            )
+        )
+
+        assert response.error is None
+        assert response.tool_calls[0].audit_logged is True
+        content = log_path.read_text(encoding="utf-8")
+        record = json.loads(content.strip().splitlines()[-1])
+        assert record["action"] == "order_query"
+        assert record["permission"] == "ORDER_QUERY_AGENT"
+        assert record["resource_type"] == "order"
+        assert record["allowed"] is True
+        assert record["success"] is True
+        assert "u1001" not in content
+        assert record["target_user_id_masked"] == "u***1"
+
+    asyncio.run(scenario())

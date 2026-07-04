@@ -27,6 +27,12 @@ class Permission(str, Enum):
     TICKET_CREATE_AGENT = "TICKET_CREATE_AGENT"
     TICKET_QUERY_SELF = "TICKET_QUERY_SELF"
     TICKET_QUERY_AGENT = "TICKET_QUERY_AGENT"
+    OFFER_QUERY_SELF = "OFFER_QUERY_SELF"
+    OFFER_QUERY_AGENT = "OFFER_QUERY_AGENT"
+    OFFER_RECOMMEND_SELF = "OFFER_RECOMMEND_SELF"
+    OFFER_RECOMMEND_AGENT = "OFFER_RECOMMEND_AGENT"
+    ORDER_QUERY_SELF = "ORDER_QUERY_SELF"
+    ORDER_QUERY_AGENT = "ORDER_QUERY_AGENT"
 
 
 ALL_PERMISSIONS = frozenset(permission.value for permission in Permission)
@@ -40,6 +46,9 @@ ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
             Permission.PACKAGE_CHANGE_SELF.value,
             Permission.TICKET_CREATE_SELF.value,
             Permission.TICKET_QUERY_SELF.value,
+            Permission.OFFER_QUERY_SELF.value,
+            Permission.OFFER_RECOMMEND_SELF.value,
+            Permission.ORDER_QUERY_SELF.value,
         }
     ),
     # 客服可代查与代建工单；套餐变更属于更高风险操作，本阶段默认只给 admin。
@@ -50,6 +59,9 @@ ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
             Permission.BILL_QUERY_AGENT.value,
             Permission.TICKET_CREATE_AGENT.value,
             Permission.TICKET_QUERY_AGENT.value,
+            Permission.OFFER_QUERY_AGENT.value,
+            Permission.OFFER_RECOMMEND_AGENT.value,
+            Permission.ORDER_QUERY_AGENT.value,
         }
     ),
     Role.ADMIN: ALL_PERMISSIONS,
@@ -66,6 +78,10 @@ SENSITIVE_PERMISSIONS = frozenset(
         Permission.TICKET_CREATE_AGENT.value,
         Permission.TICKET_QUERY_SELF.value,
         Permission.TICKET_QUERY_AGENT.value,
+        Permission.OFFER_QUERY_AGENT.value,
+        Permission.OFFER_RECOMMEND_AGENT.value,
+        Permission.ORDER_QUERY_SELF.value,
+        Permission.ORDER_QUERY_AGENT.value,
     }
 )
 

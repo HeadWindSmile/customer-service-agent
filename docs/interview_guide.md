@@ -16,7 +16,7 @@
 
 推荐口径：
 
-> 简历里的项目是生产项目，真实接入了业务系统和外部基础设施；当前仓库是脱敏后按阶段复现的版本，已经实现了 AI 服务层、RAG、LCEL、Router、工具调用、RBAC、安全、事件和 trace 等核心架构。第 14 阶段已经补齐 MMR、Reranker 抽象、BGE provider 和 Milvus 可配置适配，后续继续按“真实接入优先，fallback 保底”的方式，把 RocketMQ、Offer/Order 和 Prometheus-compatible metrics 逐步接进来。
+> 简历里的项目是生产项目，真实接入了业务系统和外部基础设施；当前仓库是脱敏后按阶段复现的版本，已经实现了 AI 服务层、RAG、LCEL、Router、工具调用、RBAC、安全、事件和 trace 等核心架构。第 14 阶段已经补齐 MMR、Reranker 抽象、BGE provider 和 Milvus 可配置适配，第 16 阶段已补齐 Offer/Order 基础业务域；后续继续按“真实接入优先，fallback 保底”的方式，把 RocketMQ 真实 SDK 和 Prometheus-compatible metrics 逐步接进来。
 
 回答时要把三类内容分开：
 
@@ -80,6 +80,8 @@ Router 是注册式路由表，新增 intent 不需要改一大段 `if/else`。
 工具调用展示的是 Agent 接入业务系统的能力，不是简单 mock 函数。AI 服务通过 `BusinessClient` 调用业务系统，工具调用结果进入 `tool_calls`，包括参数、输出、成功状态、耗时、权限和审计状态。
 
 生产环境只需要把 mock 业务服务替换成真实 Spring Boot 内部 API，AI 服务层的 Router 和 Tools 边界可以保留。
+
+第 16 阶段新增了 Offer / Order 业务域：Offer 查询和推荐展示业务推荐边界，Order 查询展示敏感订单数据的 RBAC 与审计边界。需要强调当前只做基础查询和推荐，不把 Demo 描述成完整订单交易系统。
 
 ## 多轮记忆怎么讲
 

@@ -19,7 +19,7 @@ flowchart TB
     Low -->|否| Router["CustomerRouter"]
 ```
 
-## 12 类 intent
+## 15 类 intent
 
 | intent | 说明 | 默认链路 |
 |---|---|---|
@@ -33,6 +33,9 @@ flowchart TB
 | `network_repair` | 网络报修 | Tool |
 | `ticket_create` | 创建工单 | Tool |
 | `ticket_query` | 查询工单 | Tool |
+| `offer_query` | 查询可办理优惠/权益 | Tool |
+| `offer_recommend` | 根据诉求推荐 offer | Tool |
+| `order_query` | 查询订单状态或最近订单 | Tool |
 | `human_transfer` | 转人工 | 兜底 |
 | `unknown` | 未知诉求 | 澄清 |
 
@@ -42,6 +45,7 @@ flowchart TB
 
 ```text
 month, target_package, issue_type, ticket_id,
+order_id, offer_type, need, budget,
 phone_number, product_name, target_user_id
 ```
 
@@ -83,3 +87,14 @@ intent -> handler
 
 `Router` 只负责根据 intent 分发，不负责 FastAPI 请求、事件投递或 trace 持久化。
 
+## 第 16 阶段新增分发
+
+Offer / Order 业务域不改 `CustomerAgent` 主编排，只在 `CustomerRouter` 注册新 handler：
+
+| intent | handler | tool |
+|---|---|---|
+| `offer_query` | `_handle_offer_query` | `query_available_offers` |
+| `offer_recommend` | `_handle_offer_recommend` | `recommend_offers` |
+| `order_query` | `_handle_order_query` | `query_order` 或 `query_recent_orders` |
+
+新增业务域仍复用 `_call_tool` 中的权限、安全、审计、耗时和 `tool_calls` 结构，不把 Offer/Order 逻辑写进 API 层。

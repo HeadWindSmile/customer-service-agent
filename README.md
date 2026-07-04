@@ -4,7 +4,7 @@
 
 这是一个用于 Agent 开发岗位面试展示的企业级 AI 客服问答系统 Demo。它不是普通 ChatBot，而是在原有 Java/Spring Boot 主业务系统旁边新增一层 Python/FastAPI AI 服务，模拟“业务微服务 + AI 服务层（LLM + Agent）”融合架构。
 
-当前已完成第 15 阶段：AI 评测体系增强。项目默认本地模式不依赖真实 LLM、真实 Milvus、真实 BGE、真实 Reranker、真实 RocketMQ、真实 Redis 或真实数据库，可以用 mock/fallback 跑通完整主链路；评测报告会区分“本地 Demo 结果”和“生产项目指标口径”，后续阶段继续按“真实接入优先，fallback 保底”的原则逐步接入 Offer/Order 和 Prometheus-compatible metrics。
+当前已完成第 16 阶段：Offer / Order 业务域增强。项目默认本地模式不依赖真实 LLM、真实 Milvus、真实 BGE、真实 Reranker、真实 RocketMQ、真实 Redis 或真实数据库，可以用 mock/fallback 跑通完整主链路；评测报告会区分“本地 Demo 结果”和“生产项目指标口径”。第 16 阶段已把优惠权益 offer、订单 order 通过 BusinessClient 和 mock 业务服务接入，后续阶段继续按“真实接入优先，fallback 保底”的原则补 Prometheus-compatible metrics。
 
 ## 背景痛点
 
@@ -44,7 +44,7 @@ flowchart LR
 | 意图识别 | 规则预分类 + LLM 结构化 JSON，默认 MockLLM |
 | RAG | Markdown/TXT 知识库、零宽断言中文分块、Mock/BGE/OpenAI-compatible Embedding、Mock/Chroma/Milvus VectorStore fallback、MMR、Reranker、sources 返回 |
 | LLM 链路 | LangChain LCEL，支持 mock、DashScope qwen-plus、OpenAI-compatible |
-| 业务工具 | `BusinessClient` 抽象，HTTP client + 本地 mock fallback |
+| 业务工具 | `BusinessClient` 抽象，HTTP client + 本地 mock fallback，覆盖套餐、账单、工单、Offer、Order |
 | 会话记忆 | 内存版默认，Redis 可选，Redis 不可用自动 fallback |
 | 权限审计 | RBAC、AuditLogger、本地 JSON Lines 审计日志 |
 | 内容安全 | 规则、正则、Mock 语义检测、review queue、脱敏 |
@@ -109,7 +109,7 @@ rewritten_query, safety_result, error
 
 ## 业务场景
 
-当前支持 12 类意图：
+当前支持 15 类意图：
 
 | 意图 | 示例 | 当前链路 |
 |---|---|---|
@@ -123,6 +123,9 @@ rewritten_query, safety_result, error
 | `network_repair` | 我要报修宽带断网 | 工单工具 |
 | `ticket_create` | 创建宽带故障工单 | 工单工具 |
 | `ticket_query` | 查工单进度 | 工单工具 |
+| `offer_query` | 查询可办理优惠/权益 | Offer 工具 |
+| `offer_recommend` | 我流量不够，推荐一个优惠 | Offer 工具 |
+| `order_query` | 查订单状态或最近订单 | Order 工具 |
 | `human_transfer` | 转人工客服 | 兜底文案 |
 | `unknown` | 无法识别的问题 | 澄清问题 |
 
@@ -168,7 +171,7 @@ LLM_PROVIDER=mock
 
 ## Tools + Spring Boot 边界
 
-AI 服务不直接读写业务数据库。套餐、账单、用户、工单能力都通过 `BusinessClient` 调用业务系统。当前仓库提供 `mock_business_service/` 模拟原有 Spring Boot 内部 HTTP API；当 `BUSINESS_SERVICE_BASE_URL` 为空时，工具层走本地 `MockBusinessClient` fallback。
+AI 服务不直接读写业务数据库。套餐、账单、用户、工单、Offer 和 Order 能力都通过 `BusinessClient` 调用业务系统。当前仓库提供 `mock_business_service/` 模拟原有 Spring Boot 内部 HTTP API；当 `BUSINESS_SERVICE_BASE_URL` 为空时，工具层走本地 `MockBusinessClient` fallback。
 
 详细说明见 [docs/tool_calling_design.md](docs/tool_calling_design.md)。
 
@@ -289,6 +292,24 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"agent001\",\"session_id\":\"demo-agent-bill\",\"role\":\"agent\",\"target_user_id\":\"u1002\",\"message\":\"帮客户查本月账单\"}"
 ```
 
+查询可办理优惠/权益：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"u1001\",\"session_id\":\"demo-offer-query\",\"role\":\"user\",\"message\":\"我有哪些可办理优惠权益？\"}"
+```
+
+根据诉求推荐 Offer：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"u1001\",\"session_id\":\"demo-offer-recommend\",\"role\":\"user\",\"message\":\"我流量不够，预算20元以内，推荐一个优惠\"}"
+```
+
+客服代查订单状态：
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"agent001\",\"session_id\":\"demo-agent-order\",\"role\":\"agent\",\"target_user_id\":\"u1001\",\"message\":\"帮客户查订单 ORD-20260701001 的状态\"}"
+```
+
 完整演示脚本见 [docs/demo_script.md](docs/demo_script.md)。
 
 ## 面试讲解点
@@ -323,7 +344,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 13. 简历成果映射与真实接入路线图
 14. RAG 真实检索增强：零宽断言分块、MMR、Reranker 抽象、BGE、Milvus
 15. AI 评测体系增强：TopK、疑似幻觉、意图、工具、安全、延迟、Token 成本
-16. Offer / Order 业务域增强
+16. Offer / Order 业务域增强：已新增 offer_query、offer_recommend、order_query、OfferTool、OrderTool、业务服务契约、RBAC、审计和测试
 17. 性能与可观测性增强：Prometheus-compatible `/metrics`、性能报告、trace latency
 18. 最终面试演示闭环
 
@@ -337,5 +358,5 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 4. Prometheus、Grafana、OpenTelemetry Collector 接入完整监控链路。
 5. 真实安全审核模型替换 Mock 语义检测。
 6. 用真实 BGE Embedding、BGE-Reranker 或企业 rerank 网关跑可选离线对比评测报告。
-7. Offer / Order 等业务域通过业务微服务 API 接入，不让 AI 服务直连业务库。
+7. Offer / Order 已通过业务微服务 API 边界接入基础查询和推荐能力；后续可扩展订单取消、创建等写操作，但仍不让 AI 服务直连业务库。
 8. 在线反馈、人工审核后台和持续评测流水线。

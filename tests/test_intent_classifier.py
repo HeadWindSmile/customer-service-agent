@@ -30,10 +30,13 @@ class StubIntentChain:
         ("我要报修宽带断网", IntentName.NETWORK_REPAIR.value),
         ("我要创建工单，宽带断网", IntentName.TICKET_CREATE.value),
         ("帮我查工单 TCK-ABC123456 的进度", IntentName.TICKET_QUERY.value),
+        ("我有哪些可办理优惠权益？", IntentName.OFFER_QUERY.value),
+        ("我流量不够，推荐一个优惠", IntentName.OFFER_RECOMMEND.value),
+        ("帮我查订单 ORD-20260701001 的状态", IntentName.ORDER_QUERY.value),
         ("帮我转人工客服", IntentName.HUMAN_TRANSFER.value),
     ],
 )
-def test_rule_classifier_supports_12_intent_taxonomy(message: str, expected_intent: str):
+def test_rule_classifier_supports_phase16_intent_taxonomy(message: str, expected_intent: str):
     classifier = IntentClassifier()
 
     result = classifier.classify(message)
@@ -82,3 +85,16 @@ def test_common_slots_are_extracted_before_llm_stage():
     assert result.slots["target_user_id"] == "u1002"
     assert result.slots["ticket_id"] == "TCK-ABC123456"
     assert result.slots["phone_number"] == "138****5678"
+
+
+def test_phase16_offer_and_order_slots_are_extracted_by_rules():
+    classifier = IntentClassifier()
+
+    offer_result = classifier.classify("我流量不够，预算20元以内，推荐一个优惠")
+    order_result = classifier.classify("帮我查订单 ORD-20260701001 的状态")
+
+    assert offer_result.intent == "offer_recommend"
+    assert offer_result.slots["need"] == "流量不够用"
+    assert offer_result.slots["budget"] == 20.0
+    assert order_result.intent == "order_query"
+    assert order_result.slots["order_id"] == "ORD-20260701001"
