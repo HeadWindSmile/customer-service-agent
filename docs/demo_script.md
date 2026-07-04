@@ -28,7 +28,7 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 
 1. 现场演示能力：`/api/chat`、RAG、LCEL、Router、Tools、Memory、RBAC、安全、EventBus、trace、eval。
 2. 当前 fallback 能力：MockLLM、MockEmbedding、MockVectorStore、MockBusinessClient、MockEventProducer、metrics-lite。
-3. 后续真实接入能力：第 14-18 阶段逐步补 Milvus、BGE、Reranker、RocketMQ、Offer/Order、Prometheus-compatible `/metrics`。
+3. 后续真实接入能力：第 14 阶段已补 Milvus、BGE、Reranker 的可配置接入点和 fallback；第 15-18 阶段继续补评测报告、RocketMQ、Offer/Order、Prometheus-compatible `/metrics`。
 
 如果面试官问简历中的生产指标，需要说明这些指标来自真实生产项目或生产评测体系，当前脚本只用于验证脱敏仓库的可运行链路和演示口径。
 

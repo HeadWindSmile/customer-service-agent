@@ -57,6 +57,18 @@
 - [ ] 没有把生产指标写成当前本地仓库的自动化测试结果。
 - [ ] 后续阶段如果真实接入 Milvus、BGE、RocketMQ、Offer/Order 或 `/metrics`，需要同步更新 resume_mapping、README 和面试话术。
 
+## 第 14 阶段 RAG 检索增强自检
+
+- [ ] 中文分块使用句末零宽断言，句号、问号、叹号等标点保留在原句内。
+- [ ] chunk 保留 `title`、`section`、`source` 和原始 `metadata`。
+- [ ] RAG 检索支持 `RAG_CANDIDATE_COUNT` 多候选召回。
+- [ ] MMR 可通过 `RAG_MMR_ENABLED` 和 `RAG_MMR_LAMBDA` 配置。
+- [ ] Reranker 通过 `BaseReranker` 抽象接入，默认 `MockReranker` 可运行。
+- [ ] BGE Embedding 和 BGE/OpenAI-compatible Reranker 外部依赖不可用时会 fallback。
+- [ ] `VECTOR_STORE=milvus` 但未配置或连接失败时会 fallback 到 MockVectorStore。
+- [ ] trace 包含 `vector_store_type`、`embedding_provider`、`candidate_count`、`mmr_enabled`、`reranker_used`、`reranker_type`、`final_top_k`。
+- [ ] pytest 覆盖 splitter、MMR、reranker、Milvus fallback 和 retriever trace。
+
 ## 测试检查
 
 ```bash

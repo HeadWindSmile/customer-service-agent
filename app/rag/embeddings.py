@@ -99,7 +99,52 @@ class DashScopeEmbedding(OpenAICompatibleEmbedding):
         )
 
 
+class BGEEmbedding(BaseEmbedding):
+    """BGE 中文向量模型适配器。
+
+    这里通过 lazy import 接入 sentence-transformers，避免默认本地模式安装大型
+    模型依赖。配置 `EMBEDDING_PROVIDER=bge` 且依赖/模型可用时走真实 BGE；
+    任何加载或推理失败都会回退到 MockEmbedding，保证 Demo 最小链路仍可启动。
+    """
+
+    def __init__(
+        self,
+        model_name: str | None = None,
+        device: str | None = None,
+        normalize_embeddings: bool = True,
+    ) -> None:
+        self.model_name = model_name or settings.bge_embedding_model_name
+        self.device = device if device is not None else settings.bge_embedding_device
+        self.normalize_embeddings = normalize_embeddings
+        self.fallback = MockEmbedding(dimensions=settings.embedding_dimensions)
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("未安装 sentence-transformers，BGE embedding 已降级到 mock。") from exc
+
+        kwargs = {"device": self.device} if self.device else {}
+        self.model = SentenceTransformer(self.model_name, **kwargs)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        try:
+            vectors = self.model.encode(
+                texts,
+                normalize_embeddings=self.normalize_embeddings,
+                show_progress_bar=False,
+            )
+            return [[float(value) for value in vector] for vector in vectors]
+        except Exception:
+            return self.fallback.embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        vectors = self.embed_documents([text])
+        return vectors[0] if vectors else self.fallback.embed_query(text)
+
+
 def create_embedding(provider: str) -> BaseEmbedding:
+    provider = (provider or "mock").lower()
     if provider == "mock":
         return MockEmbedding()
     if provider == "dashscope":
@@ -116,6 +161,11 @@ def create_embedding(provider: str) -> BaseEmbedding:
                 dimensions=settings.embedding_dimensions,
                 timeout_seconds=settings.embedding_timeout_seconds,
             )
+        except Exception:
+            return MockEmbedding()
+    if provider == "bge":
+        try:
+            return BGEEmbedding(normalize_embeddings=settings.bge_normalize_embeddings)
         except Exception:
             return MockEmbedding()
     return MockEmbedding()

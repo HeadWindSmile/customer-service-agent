@@ -10,13 +10,13 @@
 
 为了让它更像企业项目，我还加了多轮 memory、RBAC、audit、安全检测、事件和 trace。比如客服代用户查账单必须带 `target_user_id`，工具调用前会检查权限，敏感操作会写审计日志。每次请求会生成 `trace_id`，可以回放 RAG、LLM、工具、安全和事件投递过程。
 
-当前 Demo 默认用 mock/fallback，保证本地没有真实 LLM、Redis、RocketMQ、数据库也能启动。生产环境可以把这些边界替换为 Redis Cluster、Milvus、真实 RocketMQ 和 Prometheus，但当前 Demo 不夸大这些能力。
+当前 Demo 默认用 mock/fallback，保证本地没有真实 LLM、Milvus、BGE、Reranker、Redis、RocketMQ、数据库也能启动。生产环境可以把这些边界替换为 Redis Cluster、Milvus、真实 RocketMQ 和 Prometheus，但当前 Demo 不夸大这些能力。
 
 ## 如何解释生产项目与当前仓库差异
 
 推荐口径：
 
-> 简历里的项目是生产项目，真实接入了业务系统和外部基础设施；当前仓库是脱敏后按阶段复现的版本，已经实现了 AI 服务层、RAG、LCEL、Router、工具调用、RBAC、安全、事件和 trace 等核心架构。第 13 阶段开始我把简历成果和仓库能力逐项映射，后续按“真实接入优先，fallback 保底”的方式，把 Milvus、BGE、Reranker、RocketMQ、Offer/Order 和 Prometheus-compatible metrics 逐步接进来。
+> 简历里的项目是生产项目，真实接入了业务系统和外部基础设施；当前仓库是脱敏后按阶段复现的版本，已经实现了 AI 服务层、RAG、LCEL、Router、工具调用、RBAC、安全、事件和 trace 等核心架构。第 14 阶段已经补齐 MMR、Reranker 抽象、BGE provider 和 Milvus 可配置适配，后续继续按“真实接入优先，fallback 保底”的方式，把 RocketMQ、Offer/Order 和 Prometheus-compatible metrics 逐步接进来。
 
 回答时要把三类内容分开：
 
@@ -61,7 +61,7 @@ knowledge docs -> loader -> cleaner -> splitter -> embedding -> vector store -> 
 
 1. sources 为空不调用 LLM，避免编造。
 2. Prompt 约束模型不能承诺资费、赔偿或办理结果。
-3. 当前是 mock vector store，生产可替换 Milvus。
+3. 当前默认是 mock vector store，已提供 Milvus 可配置适配；未配置或连接失败会 fallback。
 4. trace 会记录 source_count、doc_ids、scores 和 cache_hit。
 
 ## 意图识别与 Router 怎么讲

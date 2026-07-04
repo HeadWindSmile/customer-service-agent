@@ -26,7 +26,7 @@ trace 中包含：
 2. intent、slots、confidence、intent_reason。
 3. memory backend、读写耗时、summary/key_facts 状态。
 4. query rewrite 结果。
-5. RAG source 数量、doc_ids、scores、cache_hit。
+5. RAG source 数量、doc_ids、scores、cache_hit、vector_store_type、embedding_provider、candidate_count、mmr_enabled、reranker_used、reranker_type、final_top_k。
 6. LLM provider、model、估算 token、fallback 状态。
 7. tool_calls、权限、审计、工具耗时。
 8. input/output/tool safety 结果。
@@ -79,4 +79,3 @@ python evals/run_eval.py --base-url http://127.0.0.1:8000
 ## 生产扩展
 
 生产环境可把当前 trace 字段映射到 OpenTelemetry，把 metrics 接到 Prometheus/Grafana，把 event 接入真实 MQ。当前 Demo 没有接入完整 OTel Collector 或生产监控系统。
-

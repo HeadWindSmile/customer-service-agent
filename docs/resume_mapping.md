@@ -4,7 +4,7 @@
 
 本项目对应简历中的企业级 AI 客服问答系统：在原有 Java/Spring Boot 业务系统旁边建设 Python/FastAPI AI 服务层，形成“业务微服务 + AI 服务层（LLM + Agent）”融合架构，面向用户和客服人员提供业务咨询、套餐办理、故障排查、售后服务等场景能力。
 
-第 13 阶段的目标不是新增业务功能，而是把简历中的生产项目能力、当前仓库已落地能力、仍处于 mock/fallback/placeholder 的能力、以及第 14-18 阶段真实接入路线统一整理出来。后续阶段的方向是“真实接入优先，fallback 保底”：外部系统可用时走真实链路，本地最小模式仍可降级运行。
+第 13 阶段的目标不是新增业务功能，而是把简历中的生产项目能力、当前仓库已落地能力、仍处于 mock/fallback/placeholder 的能力、以及第 14-18 阶段真实接入路线统一整理出来。第 14 阶段已完成 RAG 真实检索增强的代码结构，继续遵循“真实接入优先，fallback 保底”：外部系统可用时优先走真实 Milvus/BGE/Reranker 接入点，本地最小模式仍可降级运行。
 
 ## 当前仓库与简历能力总览
 
@@ -12,7 +12,7 @@
 |---|---|---|---|
 | AI 服务层 | Python/FastAPI 承载 Agent 服务 | 已实现 `/api/chat`、health、trace API | 保持薄 API，不把业务逻辑写入 API 层 |
 | Agent 编排 | LLM + Agent 服务融合业务系统 | 已实现 `CustomerAgent` 主编排和 Router 分发 | 后续增强多子链路和业务域，不推翻主编排 |
-| RAG | 解析、分块、向量化、召回、Rerank、生成 | 已有解析、清洗、分块、MockEmbedding、向量库抽象、sources、LCEL 生成 | 第 14 阶段补真实 Milvus、BGE、MMR、Reranker 抽象 |
+| RAG | 解析、分块、向量化、召回、Rerank、生成 | 已有零宽断言中文分块、Mock/BGE/OpenAI-compatible Embedding、Mock/Chroma/Milvus fallback、MMR、Reranker 抽象、sources、LCEL 生成 | 第 15 阶段补 TopK/Rerank 评测报告，真实外部服务按配置接入 |
 | LLM | qwen-plus、LCEL | 已有 LCEL、DashScope/OpenAI-compatible 适配、MockLLM fallback | 后续用真实 qwen-plus 配置跑评测，不影响本地 fallback |
 | 会话记忆 | Redis Cluster、分布式会话隔离 | 已有 RedisMemory 可选、memory fallback、summary、key_facts | 后续增强 Redis Cluster 配置说明和原子会话操作 |
 | 业务融合 | Spring Boot、MySQL 8.0、业务 API、RocketMQ | 已有 BusinessClient、HTTP client、mock_business_service、EventBus | 第 16-17 阶段补 offer/order、真实业务服务和 MQ 接入路径 |
@@ -28,9 +28,9 @@
 | LangChain | `app/agents/chains/` | 已实现 LCEL 链路 | 继续用于 RAG、intent、summary 等链路 |
 | LCEL | `RagAnswerChain`、`IntentChain` | 已实现 | 后续补更多子链路评测 |
 | 通义千问 qwen-plus | `DashScopeLLM`、OpenAI-compatible 配置 | 有适配，默认 mock | 后续用真实 Key 跑可选评测 |
-| Milvus | `MilvusVectorStore` placeholder | 尚未真实连接 | 第 14 阶段补真实适配和 fallback |
-| BGE-large-zh-v1.5 | `BaseEmbedding` 抽象 | 尚未实现专用 provider | 第 14 阶段补 BGE provider 配置 |
-| BGE-Reranker | 文档中作为扩展方向 | 尚未实现 | 第 14 阶段补 Reranker 抽象与可选实现 |
+| Milvus | `MilvusVectorStore` | 已有 pymilvus lazy 适配，默认未配置时 fallback | 配置真实 Milvus 后联调入库、检索和评测 |
+| BGE-large-zh-v1.5 | `BGEEmbedding` | 已有 sentence-transformers lazy provider，默认 mock | 安装依赖和模型后跑真实 embedding 评测 |
+| BGE-Reranker | `BaseReranker`、`BGEReranker`、`MockReranker` | 已有抽象和 lazy provider，默认 mock | 安装 FlagEmbedding 或接企业 rerank 网关后跑对比评测 |
 | Redis Cluster | `RedisMemory`、`FallbackMemoryStore` | 有 Redis 单点接口和 fallback | 后续补 Cluster 配置与 Lua/原子操作路线 |
 | MySQL 8.0 | 当前通过 mock 业务服务模拟业务数据 | 尚未真实接入 | 第 16 阶段通过业务服务边界补 order/offer，不让 AI 直连业务库 |
 | Spring Boot | `mock_business_service` 模拟内部 API | 当前为 FastAPI mock 服务 | 后续保留 HTTP 契约，替换为真实业务服务 |
@@ -42,7 +42,7 @@
 | 简历职责 | 当前仓库已完成 | 需要补齐 |
 |---|---|---|
 | Agent 服务与业务微服务融合 | `CustomerAgent`、`BusinessClient`、tools、mock 业务服务 | 真实 Spring Boot/MySQL 业务服务联调 |
-| RAG 知识库链路 | loader、cleaner、splitter、embedding、vector store、retriever、sources、LCEL | BGE、Milvus、MMR、Reranker |
+| RAG 知识库链路 | loader、cleaner、零宽断言 splitter、embedding provider、vector store、MMR、reranker、sources、LCEL | 真实 Milvus/BGE/Reranker 环境联调和 TopK 评测报告 |
 | 多场景 Agent、Router、记忆策略 | 12 类 intent、slots、confidence、Router、summary、key_facts | 更细业务域和多子链路演示 |
 | Java + Python 跨语言协同 | HTTP 边界已模拟 | 真实 Java 服务、接口契约和错误码对齐 |
 | API + RocketMQ 异步解耦 | EventBus、事件模型、mock producer、MQ placeholder | 真实 RocketMQ SDK 和失败降级策略 |
@@ -55,8 +55,8 @@
 
 | 简历成果 | 生产项目指标口径 | 当前仓库可验证内容 | 第 13 阶段表述边界 |
 |---|---|---|---|
-| Top-3 命中率 55% -> 82% | 生产评测集指标 | 当前仅有 sources 召回和简化评测 | 不把该指标写成本地结果，第 15 阶段补评测口径 |
-| Top-1 命中率 45% -> 78% | 生产 Rerank 评测 | 当前无 Reranker | 第 14-15 阶段补 MMR/Reranker 与报告 |
+| Top-3 命中率 55% -> 82% | 生产评测集指标 | 当前已有多候选召回、MMR、Reranker 抽象和简化 sources 评测 | 不把该指标写成本地结果，第 15 阶段补 TopK 评测口径 |
+| Top-1 命中率 45% -> 78% | 生产 Rerank 评测 | 当前已有 Mock/BGE/OpenAI-compatible reranker 接入点 | 第 15 阶段补真实 rerank 对比报告 |
 | 幻觉率 30% -> 5% 以下 | 生产问答质检指标 | 当前有 sources 为空不生成、prompt 约束、简化幻觉率 | 本地只说明策略，不冒充生产指标 |
 | 多轮追问准确率 92% | 生产多轮评测 | 当前有 query rewrite、summary、key_facts 测试 | 后续补多轮评测集 |
 | 意图准确率 72% -> 95% | 生产意图评测 | 当前有 12 类 intent 和基础 eval | 第 15 阶段补更完整意图数据集 |
@@ -70,7 +70,7 @@
 1. API 层保持薄封装，`/api/chat` 只接收请求、校验模型并调用 Agent。
 2. `CustomerAgent` 负责安全、记忆、改写、意图识别、权限上下文、Router、事件、trace 的主编排。
 3. `CustomerRouter` 使用注册式路由表，支持 FAQ、套餐、账单、故障、工单、转人工和 unknown 等 12 类意图。
-4. RAG 层已支持 Markdown/TXT 加载、清洗、中文客服文档分块、本地向量库、top_k sources 和 LCEL 生成。
+4. RAG 层已支持 Markdown/TXT 加载、清洗、零宽断言中文分块、多候选召回、MMR、Reranker 抽象、本地/可选 Milvus 向量库、top_k sources 和 LCEL 生成。
 5. LLM 层已支持 MockLLM、DashScope/OpenAI-compatible 适配和失败降级。
 6. Tools 层已通过 `BusinessClient` 隔离业务系统，支持套餐、账单、用户和工单能力。
 7. Memory 层已支持 memory/Redis 可选、最近 8 轮、summary、key_facts 和指代消解。
@@ -85,8 +85,9 @@
 | 能力 | 当前形态 | 后续方向 |
 |---|---|---|
 | LLM | 默认 MockLLM | 配置 qwen-plus 后走真实模型 |
-| Embedding | 默认 MockEmbedding | 增加 BGE 或兼容 embedding provider |
-| Vector Store | MockVectorStore，Chroma lazy import，Milvus placeholder | 接入真实 Milvus，失败 fallback |
+| Embedding | 默认 MockEmbedding，BGE/DashScope/OpenAI-compatible 可选 | 配置真实服务或本地模型后跑评测，失败 fallback |
+| Vector Store | 默认 MockVectorStore，Chroma/Milvus lazy import | 接入真实 Milvus 时仍保留失败 fallback |
+| Reranker | 默认 MockReranker，BGE/OpenAI-compatible 可选 | 配置真实 reranker 后跑 TopK 对比评测，失败 fallback |
 | Business Service | MockBusinessClient 和 mock_business_service | 替换为真实 Spring Boot 内部 API |
 | Memory | 默认 memory，Redis 可选 | 接入 Redis Cluster 配置与原子操作策略 |
 | Event | MockEventProducer，RocketMQProducer 占位 | 接入真实 RocketMQ SDK |
@@ -95,9 +96,9 @@
 
 ## 需要真实接入的能力清单
 
-1. Milvus：补连接配置、collection 初始化、向量写入、检索和不可用 fallback。
-2. BGE Embedding：补本地或服务化 embedding provider，明确 batch、timeout 和 fallback。
-3. MMR + BGE-Reranker：先召回候选，再重排输出 TopK，并写入 trace 和评测报告。
+1. Milvus：已补连接配置、collection 初始化、向量写入、检索和不可用 fallback；仍需真实 Milvus 环境联调。
+2. BGE Embedding：已补本地 BGE provider 和 fallback；仍需安装模型依赖后跑真实 embedding 评测。
+3. MMR + BGE-Reranker：已补多候选召回、MMR、Reranker 抽象和 trace 字段；仍需第 15 阶段输出 TopK/Rerank 对比报告。
 4. Redis Cluster：补 Cluster URL/节点配置、Lua/事务式会话操作策略和降级说明。
 5. RocketMQ：补真实 Producer SDK、topic/tag/key、发送失败隔离和本地 jsonl fallback。
 6. Offer / Order：新增业务域，但 AI 服务仍通过业务 API 调用，不直接操作 MySQL。
@@ -118,10 +119,10 @@
 
 ## 禁止夸大说明
 
-1. 不要说当前仓库已经连接真实 Milvus、Redis Cluster、RocketMQ、MySQL 或 Prometheus/Grafana。
+1. 不要说当前仓库默认已经连接真实 Milvus、Redis Cluster、RocketMQ、MySQL 或 Prometheus/Grafana。
 2. 不要说本地运行版本已经支持 5 万并发会话或生产级高并发。
 3. 不要把生产项目中的 TopK、幻觉率、可用性、满意度等指标写成当前仓库测试结果。
-4. 不要说当前仓库已经完成真实 BGE-Reranker，除非第 14 阶段代码和测试已经落地。
+4. 可以说当前仓库已有 BGE-Reranker 接入点和 Mock fallback，但不要说本地默认已经跑过真实 BGE-Reranker 指标。
 5. 不要把 `mock_business_service` 描述成真实 Spring Boot 服务，它只是业务边界模拟。
 6. 不要把“多 Agent 编排”直接描述成当前已完成能力；当前更准确的说法是“单主 Agent 编排 + 多意图子链路 Router 分发”。
 
@@ -129,7 +130,7 @@
 
 | 阶段 | 名称 | 目标 |
 |---|---|---|
-| 第 14 阶段 | RAG 真实检索增强 | 增加零宽断言句末分块、MMR、多候选召回、Reranker 抽象、BGE provider、Milvus 真实适配，并保留 mock fallback |
+| 第 14 阶段 | RAG 真实检索增强 | 已完成零宽断言句末分块、MMR、多候选召回、Reranker 抽象、BGE provider、Milvus 真实适配，并保留 mock fallback |
 | 第 15 阶段 | AI 评测体系增强 | 增加 Top1/Top3/TopK 命中率、召回覆盖率、幻觉率、意图准确率、工具准确率、安全拦截率、延迟和 Token 成本报告 |
 | 第 16 阶段 | Offer / Order 业务域增强 | 新增商品 offer、订单 order 的业务工具、业务服务契约和测试，保持 AI 服务不直连业务库 |
 | 第 17 阶段 | 性能与可观测性增强 | 增加 Prometheus-compatible `/metrics`、性能报告、trace latency 字段和压测报告模板，为真实监控平台接入做准备 |
@@ -138,3 +139,7 @@
 ## 第 13 阶段验收口径
 
 第 13 阶段完成后，不要求新增环境变量，不新增前端页面，不修改业务主链路。验收重点是文档是否把“当前已实现、当前降级边界、真实接入路线、生产项目指标口径”讲清楚，并通过 pytest 保证文档入口和禁止夸大规则稳定存在。
+
+## 第 14 阶段补齐能力
+
+第 14 阶段补齐了简历中 RAG 检索优化相关的工程结构：中文句末零宽断言分块、多候选召回、MMR、多样性重排、Reranker 抽象、BGE Embedding provider、BGE/OpenAI-compatible reranker 接入点、Milvus 可配置适配，以及可观测 trace 字段。当前仍需真实 Milvus、BGE 模型或企业 rerank 网关配合，才能证明生产指标。

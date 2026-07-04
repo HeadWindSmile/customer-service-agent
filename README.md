@@ -4,7 +4,7 @@
 
 这是一个用于 Agent 开发岗位面试展示的企业级 AI 客服问答系统 Demo。它不是普通 ChatBot，而是在原有 Java/Spring Boot 主业务系统旁边新增一层 Python/FastAPI AI 服务，模拟“业务微服务 + AI 服务层（LLM + Agent）”融合架构。
 
-当前已完成第 13 阶段：简历成果映射与真实接入路线图。项目默认本地模式不依赖真实 LLM、真实 RocketMQ、真实 Redis 或真实数据库，可以用 mock/fallback 跑通完整主链路；后续阶段按“真实接入优先，fallback 保底”的原则逐步接入 Milvus、BGE、Reranker、RocketMQ、Offer/Order 和 Prometheus-compatible metrics。
+当前已完成第 14 阶段：RAG 真实检索增强。项目默认本地模式不依赖真实 LLM、真实 Milvus、真实 BGE、真实 Reranker、真实 RocketMQ、真实 Redis 或真实数据库，可以用 mock/fallback 跑通完整主链路；后续阶段继续按“真实接入优先，fallback 保底”的原则逐步接入 RocketMQ、Offer/Order 和 Prometheus-compatible metrics。
 
 ## 背景痛点
 
@@ -42,7 +42,7 @@ flowchart LR
 | Web 框架 | FastAPI |
 | Agent 编排 | `CustomerAgent` 自定义主编排 |
 | 意图识别 | 规则预分类 + LLM 结构化 JSON，默认 MockLLM |
-| RAG | Markdown/TXT 知识库、清洗、分块、MockEmbedding、本地 vector store、sources 返回 |
+| RAG | Markdown/TXT 知识库、零宽断言中文分块、Mock/BGE/OpenAI-compatible Embedding、Mock/Chroma/Milvus VectorStore fallback、MMR、Reranker、sources 返回 |
 | LLM 链路 | LangChain LCEL，支持 mock、DashScope qwen-plus、OpenAI-compatible |
 | 业务工具 | `BusinessClient` 抽象，HTTP client + 本地 mock fallback |
 | 会话记忆 | 内存版默认，Redis 可选，Redis 不可用自动 fallback |
@@ -52,7 +52,7 @@ flowchart LR
 | 可观测性 | trace/span/event/attribute、trace 回放、metrics-lite、evals |
 | 部署 | Dockerfile、docker-compose、health/ready、smoke/load 脚本 |
 
-说明：Milvus、Redis Cluster、真实 RocketMQ、Prometheus/Grafana/OpenTelemetry Collector 都是生产环境可扩展方向，当前 Demo 没有默认接入这些外部系统。
+说明：Milvus、BGE、BGE-Reranker 已有可配置接入点，但默认本地模式仍走 mock/fallback，不要求启动外部服务。Redis Cluster、真实 RocketMQ、Prometheus/Grafana/OpenTelemetry Collector 仍是后续生产环境可扩展方向。
 
 ## 目录结构
 
@@ -128,7 +128,27 @@ rewritten_query, safety_result, error
 
 ## RAG
 
-RAG 层从 `data/knowledge/` 加载 Markdown/TXT，经过清洗、分块、embedding、vector store 检索后返回 `sources`。LCEL 链路只在 sources 存在时生成答案，资料不足时直接兜底转人工，避免模型编造套餐、费用或赔偿承诺。
+RAG 层从 `data/knowledge/` 加载 Markdown/TXT，经过清洗、零宽断言中文分块、embedding、vector store 多候选召回、MMR 多样性筛选和 reranker 后返回 `sources`。LCEL 链路只在 sources 存在时生成答案，资料不足时直接兜底转人工，避免模型编造套餐、费用或赔偿承诺。
+
+默认本地配置使用 mock/fallback：
+
+```bash
+VECTOR_STORE=mock
+EMBEDDING_PROVIDER=mock
+RAG_MMR_ENABLED=true
+RAG_RERANKER_PROVIDER=mock
+```
+
+可选真实接入方向：
+
+```bash
+VECTOR_STORE=milvus
+MILVUS_URI=http://127.0.0.1:19530
+EMBEDDING_PROVIDER=bge
+RAG_RERANKER_PROVIDER=bge
+```
+
+如果 `pymilvus`、`sentence-transformers`、`FlagEmbedding` 或外部服务不可用，系统会自动降级到 MockVectorStore、MockEmbedding 或 MockReranker。
 
 详细说明见 [docs/rag_design.md](docs/rag_design.md)。
 
@@ -282,7 +302,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 
 ## 简历映射说明
 
-第 13 阶段新增 [docs/resume_mapping.md](docs/resume_mapping.md)，用于把简历中的生产项目能力、当前仓库已实现能力、mock/fallback/placeholder 边界和第 14-18 阶段真实接入路线逐项对齐。面试时建议先讲真实生产项目，再说明当前仓库是脱敏后的可运行复现版本，后续会按真实接入路线补齐外部系统。
+第 13 阶段新增 [docs/resume_mapping.md](docs/resume_mapping.md)，用于把简历中的生产项目能力、当前仓库已实现能力、mock/fallback/placeholder 边界和第 14-18 阶段真实接入路线逐项对齐。第 14 阶段已补齐 RAG 检索增强代码结构，包括 MMR、Reranker 抽象、BGE provider 和 Milvus 适配；面试时仍需说明本地默认不强制依赖真实外部服务。
 
 ## 项目阶段
 
@@ -310,10 +330,10 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 这些是后续真实接入方向，不代表当前本地模式已经默认连接外部系统：
 
 1. Redis Cluster 替换单机 Redis 或 memory fallback。
-2. Milvus 或企业向量库替换本地 mock/chroma vector store。
+2. Milvus 或企业向量库替换本地 mock/chroma vector store，并接入真实 embedding 数据。
 3. 真实 RocketMQ Producer 替换当前 placeholder。
 4. Prometheus、Grafana、OpenTelemetry Collector 接入完整监控链路。
 5. 真实安全审核模型替换 Mock 语义检测。
-6. BGE Embedding、MMR 和 BGE-Reranker 补齐生产 RAG 优化链路。
+6. 用真实 BGE Embedding、BGE-Reranker 或企业 rerank 网关跑离线评测报告。
 7. Offer / Order 等业务域通过业务微服务 API 接入，不让 AI 服务直连业务库。
 8. 更完整的离线评测、在线反馈和人工审核后台。

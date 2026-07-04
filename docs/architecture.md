@@ -94,9 +94,8 @@ sequenceDiagram
 当前已经实现的是企业级 Demo 的工程骨架和本地可运行链路，不应夸大为生产系统：
 
 1. RocketMQ 当前是 placeholder，不连接真实 NameServer。
-2. Milvus 当前是预留边界，本地默认使用 mock vector store。
+2. Milvus 已有可配置适配，本地默认使用 mock vector store，未配置或连接失败会自动 fallback。
 3. Redis 可选，默认 memory fallback。
 4. Prometheus/Grafana/OpenTelemetry Collector 未接入。
 5. `metrics-lite` 是单进程内存指标，不是生产监控系统。
 6. `simple_load_test.py` 只做本地小规模验证，不代表生产级高并发。
-

@@ -12,7 +12,9 @@ class ChineseTextSplitter:
     """
 
     _heading_pattern = re.compile(r"^(#{1,6})\s+(.+)$")
-    _sentence_pattern = re.compile(r"(?<=[。！？；])")
+    # 零宽断言只在句末标点之后切分，标点仍留在原句内，避免 keep_separator
+    # 把句末标点挪到相邻 chunk 后造成语义边界混乱。
+    _sentence_pattern = re.compile(r"(?<=[。！？；.!?;])")
 
     def __init__(self, chunk_size: int = 500, chunk_overlap: int = 80) -> None:
         self.chunk_size = chunk_size
@@ -70,18 +72,36 @@ class ChineseTextSplitter:
             sentences.extend(parts or [paragraph])
 
         chunks: list[str] = []
-        current = ""
+        current_sentences: list[str] = []
+        current_length = 0
         for sentence in sentences:
-            if not current:
-                current = sentence
-                continue
-            if len(current) + len(sentence) <= self.chunk_size:
-                current += sentence
-                continue
-            chunks.append(current)
-            overlap = current[-self.chunk_overlap :] if self.chunk_overlap else ""
-            current = f"{overlap}{sentence}"
-        if current:
-            chunks.append(current)
+            for segment in self._split_long_sentence(sentence):
+                segment_length = len(segment)
+                if current_sentences and current_length + segment_length > self.chunk_size:
+                    chunks.append("".join(current_sentences).strip())
+                    current_sentences = self._overlap_sentences(current_sentences)
+                    current_length = sum(len(item) for item in current_sentences)
+                current_sentences.append(segment)
+                current_length += segment_length
+        if current_sentences:
+            chunks.append("".join(current_sentences).strip())
         return chunks
 
+    def _split_long_sentence(self, sentence: str) -> list[str]:
+        if len(sentence) <= self.chunk_size:
+            return [sentence]
+        return [sentence[start : start + self.chunk_size] for start in range(0, len(sentence), self.chunk_size)]
+
+    def _overlap_sentences(self, sentences: list[str]) -> list[str]:
+        if not self.chunk_overlap:
+            return []
+
+        overlap: list[str] = []
+        total_length = 0
+        for sentence in reversed(sentences):
+            sentence_length = len(sentence)
+            if total_length + sentence_length > self.chunk_overlap:
+                break
+            overlap.insert(0, sentence)
+            total_length += sentence_length
+        return overlap

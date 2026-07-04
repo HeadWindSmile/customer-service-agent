@@ -456,12 +456,14 @@ class CustomerRouter:
         sources = self.retriever.search(search_query, top_k=top_k)
         trace = get_current_trace()
         cache_hit = bool(trace.attributes.get("rag_cache_hit")) if trace else False
+        retrieval_config = dict(trace.attributes.get("rag_retrieval_config") or {}) if trace else {}
         source_summary = {
             "top_k": top_k,
             "cache_hit": cache_hit,
             "source_count": len(sources),
             "doc_ids": [source.doc_id for source in sources],
             "scores": [source.score for source in sources],
+            **retrieval_config,
         }
         add_attribute("rag_retrieval", source_summary)
         add_event("rag.retrieved", source_summary)

@@ -18,10 +18,10 @@ class RagSearchCache:
         self.max_size = max(1, max_size or settings.rag_cache_max_size)
         self._items: OrderedDict[str, tuple[float, list[Source]]] = OrderedDict()
 
-    def get(self, query: str, top_k: int) -> list[Source] | None:
+    def get(self, query: str, top_k: int, variant: str = "") -> list[Source] | None:
         if self.ttl_seconds <= 0:
             return None
-        key = self._key(query, top_k)
+        key = self._key(query, top_k, variant)
         item = self._items.get(key)
         if item is None:
             return None
@@ -32,10 +32,10 @@ class RagSearchCache:
         self._items.move_to_end(key)
         return [source.model_copy(deep=True) for source in sources]
 
-    def set(self, query: str, top_k: int, sources: list[Source]) -> None:
+    def set(self, query: str, top_k: int, sources: list[Source], variant: str = "") -> None:
         if self.ttl_seconds <= 0:
             return
-        key = self._key(query, top_k)
+        key = self._key(query, top_k, variant)
         self._items[key] = (monotonic() + self.ttl_seconds, [source.model_copy(deep=True) for source in sources])
         self._items.move_to_end(key)
         while len(self._items) > self.max_size:
@@ -44,9 +44,10 @@ class RagSearchCache:
     def clear(self) -> None:
         self._items.clear()
 
-    def _key(self, query: str, top_k: int) -> str:
+    def _key(self, query: str, top_k: int, variant: str = "") -> str:
         normalized = " ".join(query.strip().lower().split())
-        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        cache_input = f"{normalized}|{variant}"
+        digest = hashlib.sha256(cache_input.encode("utf-8")).hexdigest()
         return f"{digest}:{top_k}"
 
 
