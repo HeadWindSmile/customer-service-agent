@@ -69,6 +69,17 @@
 - [ ] trace 包含 `vector_store_type`、`embedding_provider`、`candidate_count`、`mmr_enabled`、`reranker_used`、`reranker_type`、`final_top_k`。
 - [ ] pytest 覆盖 splitter、MMR、reranker、Milvus fallback 和 retriever trace。
 
+## 第 15 阶段 AI 评测体系增强自检
+
+- [ ] `evals/datasets/customer_qa_eval.jsonl` 覆盖 `faq`、`bill_explain`、`fault_diagnosis`、`tool`、`safety` 场景。
+- [ ] 数据集支持 `expected_sources`、`expected_top_k`、`expected_rerank` 和 `scenario` 标签。
+- [ ] `evals/metrics.py` 输出 Top1、Top3、TopK、source coverage、Rerank 期望、intent、tool、安全、疑似幻觉、延迟和估算 Token/成本。
+- [ ] `evals/run_eval.py` 可以复用 `/api/chat` 响应和 `/api/traces/{trace_id}`，trace 不可用时能 fallback。
+- [ ] JSON 报告和 Markdown 报告都能生成到 `evals/reports/`。
+- [ ] 报告明确区分“本地 Demo 评测结果”和“生产项目指标口径”。
+- [ ] pytest 覆盖 metrics、dataset 加载和 report 输出。
+- [ ] 文档没有把生产 TopK、幻觉率、延迟或成本指标写成本地 Demo 结果。
+
 ## 测试检查
 
 ```bash

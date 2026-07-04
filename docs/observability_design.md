@@ -65,10 +65,11 @@ curl.exe "http://127.0.0.1:8000/api/traces/{trace_id}"
 
 `evals/` 包含：
 
-1. `datasets/customer_qa_eval.jsonl`：评测数据集。
-2. `metrics.py`：intent、关键词、sources、tool、安全结果等指标。
-3. `run_eval.py`：批量调用 `/api/chat` 并生成报告。
-4. `reports/`：JSON 和 Markdown 报告。
+1. `datasets/customer_qa_eval.jsonl`：JSONL 评测数据集，支持 `scenario`、`expected_sources`、`expected_top_k`、`expected_rerank`、`expected_tool` 和 `safety_expected_action`。
+2. `schema.py`：集中做数据集加载、字段默认值和第 10 阶段旧字段兼容。
+3. `metrics.py`：计算 Top1/Top3/TopK、source coverage、Rerank 期望、intent、tool、安全动作、简化疑似幻觉、延迟和估算 Token/成本。
+4. `run_eval.py`：批量调用 `/api/chat`，并尽力通过 `trace_id` 读取 `/api/traces/{trace_id}` 补充 rerank 和 token/cost 字段；trace 读取失败时 fallback 到 response-only。
+5. `reports/`：输出 JSON 和 Markdown 报告。
 
 运行：
 
@@ -76,6 +77,28 @@ curl.exe "http://127.0.0.1:8000/api/traces/{trace_id}"
 python evals/run_eval.py --base-url http://127.0.0.1:8000
 ```
 
+如果只想依赖 `/api/chat` 响应，不读取 trace，可运行：
+
+```bash
+python evals/run_eval.py --base-url http://127.0.0.1:8000 --no-trace
+```
+
+### 第 15 阶段指标说明
+
+| 指标 | 本地 Demo 口径 |
+|---|---|
+| Top1/Top3/TopK | 对带 `expected_sources` 的 RAG 用例，检查期望文档是否出现在响应 sources 前 1/3/K 个结果中 |
+| Source coverage | 命中的 expected source 数量 / expected source 总数 |
+| Rerank 期望 | 根据 trace 中的 `rag_retrieval_config` 和 sources metadata 判断 reranker 是否符合预期 |
+| 简化疑似幻觉 | 需要 sources 但缺失、source coverage 为 0、缺少必要关键词或出现禁用承诺词时标记 |
+| Intent accuracy | 响应 `intent` 与 `expected_intent` 是否一致 |
+| Tool call accuracy | `tool_calls` 是否包含期望工具，且成功状态符合预期 |
+| Safety action accuracy | 输入/输出/工具安全动作是否符合 `safety_expected_action` |
+| Latency | eval 样本中的平均、P50、P95、最大耗时 |
+| Token / cost | 优先读取 trace 中估算 usage；mock 模式下不是供应商账单 |
+
+这些指标服务于本地 Demo 和面试讲解，不代表生产项目历史指标。生产中的 TopK、幻觉率、延迟和成本需要更大的标注集、真实模型 usage、线上监控和人工质检闭环。
+
 ## 生产扩展
 
-生产环境可把当前 trace 字段映射到 OpenTelemetry，把 metrics 接到 Prometheus/Grafana，把 event 接入真实 MQ。当前 Demo 没有接入完整 OTel Collector 或生产监控系统。
+生产环境可把当前 trace 字段映射到 OpenTelemetry，把 metrics 接到 Prometheus/Grafana，把 event 接入真实 MQ，把 eval 接入持续回归评测和人工质检流程。当前 Demo 没有接入完整 OTel Collector、生产监控系统或真实质检平台。

@@ -4,7 +4,7 @@
 
 本项目对应简历中的企业级 AI 客服问答系统：在原有 Java/Spring Boot 业务系统旁边建设 Python/FastAPI AI 服务层，形成“业务微服务 + AI 服务层（LLM + Agent）”融合架构，面向用户和客服人员提供业务咨询、套餐办理、故障排查、售后服务等场景能力。
 
-第 13 阶段的目标不是新增业务功能，而是把简历中的生产项目能力、当前仓库已落地能力、仍处于 mock/fallback/placeholder 的能力、以及第 14-18 阶段真实接入路线统一整理出来。第 14 阶段已完成 RAG 真实检索增强的代码结构，继续遵循“真实接入优先，fallback 保底”：外部系统可用时优先走真实 Milvus/BGE/Reranker 接入点，本地最小模式仍可降级运行。
+第 13 阶段的目标不是新增业务功能，而是把简历中的生产项目能力、当前仓库已落地能力、仍处于 mock/fallback/placeholder 的能力、以及第 14-18 阶段真实接入路线统一整理出来。第 14 阶段已完成 RAG 真实检索增强的代码结构，第 15 阶段已完成本地 AI 评测体系增强；继续遵循“真实接入优先，fallback 保底”：外部系统可用时优先走真实 Milvus/BGE/Reranker 接入点，本地最小模式仍可降级运行。
 
 ## 当前仓库与简历能力总览
 
@@ -12,12 +12,12 @@
 |---|---|---|---|
 | AI 服务层 | Python/FastAPI 承载 Agent 服务 | 已实现 `/api/chat`、health、trace API | 保持薄 API，不把业务逻辑写入 API 层 |
 | Agent 编排 | LLM + Agent 服务融合业务系统 | 已实现 `CustomerAgent` 主编排和 Router 分发 | 后续增强多子链路和业务域，不推翻主编排 |
-| RAG | 解析、分块、向量化、召回、Rerank、生成 | 已有零宽断言中文分块、Mock/BGE/OpenAI-compatible Embedding、Mock/Chroma/Milvus fallback、MMR、Reranker 抽象、sources、LCEL 生成 | 第 15 阶段补 TopK/Rerank 评测报告，真实外部服务按配置接入 |
+| RAG | 解析、分块、向量化、召回、Rerank、生成 | 已有零宽断言中文分块、Mock/BGE/OpenAI-compatible Embedding、Mock/Chroma/Milvus fallback、MMR、Reranker 抽象、sources、LCEL 生成、TopK/Rerank 本地评测 | 真实外部服务按配置接入后可跑对比评测 |
 | LLM | qwen-plus、LCEL | 已有 LCEL、DashScope/OpenAI-compatible 适配、MockLLM fallback | 后续用真实 qwen-plus 配置跑评测，不影响本地 fallback |
 | 会话记忆 | Redis Cluster、分布式会话隔离 | 已有 RedisMemory 可选、memory fallback、summary、key_facts | 后续增强 Redis Cluster 配置说明和原子会话操作 |
 | 业务融合 | Spring Boot、MySQL 8.0、业务 API、RocketMQ | 已有 BusinessClient、HTTP client、mock_business_service、EventBus | 第 16-17 阶段补 offer/order、真实业务服务和 MQ 接入路径 |
 | 权限安全 | RBAC、审计、内容安全、人工审核 | 已有 RBAC、audit、输入/输出/工具参数安全、review_queue | 后续补真实语义安全模型或样本库接入点 |
-| 评测观测 | 准确率、幻觉率、时延、Token 成本、trace | 已有 trace、metrics-lite、evals、估算 token/cost | 第 15 和 17 阶段补更完整指标与 Prometheus-compatible `/metrics` |
+| 评测观测 | 准确率、幻觉率、时延、Token 成本、trace | 已有 trace、metrics-lite、evals、TopK/source coverage/工具/安全/延迟/估算 token cost 报告 | 第 17 阶段补 Prometheus-compatible `/metrics` |
 
 ## 技术栈映射表
 
@@ -42,12 +42,12 @@
 | 简历职责 | 当前仓库已完成 | 需要补齐 |
 |---|---|---|
 | Agent 服务与业务微服务融合 | `CustomerAgent`、`BusinessClient`、tools、mock 业务服务 | 真实 Spring Boot/MySQL 业务服务联调 |
-| RAG 知识库链路 | loader、cleaner、零宽断言 splitter、embedding provider、vector store、MMR、reranker、sources、LCEL | 真实 Milvus/BGE/Reranker 环境联调和 TopK 评测报告 |
+| RAG 知识库链路 | loader、cleaner、零宽断言 splitter、embedding provider、vector store、MMR、reranker、sources、LCEL、TopK 本地评测 | 真实 Milvus/BGE/Reranker 环境联调和对比评测报告 |
 | 多场景 Agent、Router、记忆策略 | 12 类 intent、slots、confidence、Router、summary、key_facts | 更细业务域和多子链路演示 |
 | Java + Python 跨语言协同 | HTTP 边界已模拟 | 真实 Java 服务、接口契约和错误码对齐 |
 | API + RocketMQ 异步解耦 | EventBus、事件模型、mock producer、MQ placeholder | 真实 RocketMQ SDK 和失败降级策略 |
-| Prompt、召回、TopK、Rerank 优化 | prompt 强约束、top_k、sources 兜底、缓存 | TopK 评测、MMR、Reranker 对比报告 |
-| AI 评测体系 | intent、关键词、sources、tool、安全、幻觉标记、延迟 | Top1/Top3、Token 成本、分场景报告 |
+| Prompt、召回、TopK、Rerank 优化 | prompt 强约束、top_k、sources 兜底、缓存、Top1/Top3/TopK 本地评测 | 真实 Reranker 对比报告 |
+| AI 评测体系 | intent、关键词、sources、source coverage、tool、安全、疑似幻觉、延迟、估算 Token 成本 | 生产评测集、在线反馈和人工质检闭环 |
 | RBAC 与基础业务模块 | user/package/bill/ticket、RBAC、audit | offer/order 业务域 |
 | 性能调优和稳定性 | HTTP 连接复用、retry/backoff、circuit breaker、cache、metrics-lite | 性能报告、Prometheus-compatible metrics、真实压测口径 |
 
@@ -55,11 +55,11 @@
 
 | 简历成果 | 生产项目指标口径 | 当前仓库可验证内容 | 第 13 阶段表述边界 |
 |---|---|---|---|
-| Top-3 命中率 55% -> 82% | 生产评测集指标 | 当前已有多候选召回、MMR、Reranker 抽象和简化 sources 评测 | 不把该指标写成本地结果，第 15 阶段补 TopK 评测口径 |
-| Top-1 命中率 45% -> 78% | 生产 Rerank 评测 | 当前已有 Mock/BGE/OpenAI-compatible reranker 接入点 | 第 15 阶段补真实 rerank 对比报告 |
-| 幻觉率 30% -> 5% 以下 | 生产问答质检指标 | 当前有 sources 为空不生成、prompt 约束、简化幻觉率 | 本地只说明策略，不冒充生产指标 |
+| Top-3 命中率 55% -> 82% | 生产评测集指标 | 当前已有多候选召回、MMR、Reranker 抽象和 Top3 本地评测字段 | 不把该指标写成本地结果，本地报告只展示当前 Demo 小样本 |
+| Top-1 命中率 45% -> 78% | 生产 Rerank 评测 | 当前已有 Mock/BGE/OpenAI-compatible reranker 接入点和 Top1 本地评测字段 | 真实 rerank 对比仍需外部服务和更大评测集 |
+| 幻觉率 30% -> 5% 以下 | 生产问答质检指标 | 当前有 sources 为空不生成、prompt 约束、简化疑似幻觉检测 | 本地只说明策略和疑似检测，不冒充生产质检指标 |
 | 多轮追问准确率 92% | 生产多轮评测 | 当前有 query rewrite、summary、key_facts 测试 | 后续补多轮评测集 |
-| 意图准确率 72% -> 95% | 生产意图评测 | 当前有 12 类 intent 和基础 eval | 第 15 阶段补更完整意图数据集 |
+| 意图准确率 72% -> 95% | 生产意图评测 | 当前有 12 类 intent 和分场景 eval | 本地小样本结果不等同生产意图评测 |
 | 平均延迟 4.8s -> 2.7s | 生产 Prometheus 统计 | 当前有 latency、metrics-lite、本地压测脚本 | 不宣称本地达到生产容量 |
 | 内容安全拦截率 100% | 生产安全样本库指标 | 当前有规则、正则、Mock 语义检测和 review_queue | 后续补真实语义检测或样本评测 |
 | 问题定位效率提升 83% | 生产运维指标 | 当前 trace 可回放单次链路 | 本地证明可观测字段和回放能力 |
@@ -76,7 +76,7 @@
 7. Memory 层已支持 memory/Redis 可选、最近 8 轮、summary、key_facts 和指代消解。
 8. Safety 层已覆盖输入、输出和工具参数安全，并把中高风险写入本地 review_queue。
 9. Observability 层已支持 trace、span、event、attribute、metrics-lite、LLM usage 估算和 trace 回放。
-10. Evals 已支持离线数据集、intent、关键词、sources、工具、安全、简化幻觉率和平均延迟。
+10. Evals 已支持离线数据集、scenario 标签、expected_sources、expected_top_k、expected_rerank、Top1/Top3/TopK、source coverage、intent、工具、安全、简化疑似幻觉、延迟和估算 Token/成本报告。
 
 ## 当前 mock / fallback / placeholder 能力
 
@@ -98,12 +98,12 @@
 
 1. Milvus：已补连接配置、collection 初始化、向量写入、检索和不可用 fallback；仍需真实 Milvus 环境联调。
 2. BGE Embedding：已补本地 BGE provider 和 fallback；仍需安装模型依赖后跑真实 embedding 评测。
-3. MMR + BGE-Reranker：已补多候选召回、MMR、Reranker 抽象和 trace 字段；仍需第 15 阶段输出 TopK/Rerank 对比报告。
+3. MMR + BGE-Reranker：已补多候选召回、MMR、Reranker 抽象、trace 字段和第 15 阶段 TopK/Rerank 本地评测报告；真实对比仍需外部服务。
 4. Redis Cluster：补 Cluster URL/节点配置、Lua/事务式会话操作策略和降级说明。
 5. RocketMQ：补真实 Producer SDK、topic/tag/key、发送失败隔离和本地 jsonl fallback。
 6. Offer / Order：新增业务域，但 AI 服务仍通过业务 API 调用，不直接操作 MySQL。
 7. Prometheus-compatible metrics：补 `/metrics` 文本格式，后续可被 Prometheus 抓取。
-8. 评测报告：补 Top1/Top3、召回覆盖、Rerank 对比、幻觉、安全、工具、延迟、Token 成本。
+8. 评测报告：已补 Top1/Top3/TopK、source coverage、Rerank 期望、疑似幻觉、安全、工具、延迟、估算 Token 成本；后续可接生产数据和人工质检。
 
 ## 当前仓库与真实生产项目差距
 
@@ -131,7 +131,7 @@
 | 阶段 | 名称 | 目标 |
 |---|---|---|
 | 第 14 阶段 | RAG 真实检索增强 | 已完成零宽断言句末分块、MMR、多候选召回、Reranker 抽象、BGE provider、Milvus 真实适配，并保留 mock fallback |
-| 第 15 阶段 | AI 评测体系增强 | 增加 Top1/Top3/TopK 命中率、召回覆盖率、幻觉率、意图准确率、工具准确率、安全拦截率、延迟和 Token 成本报告 |
+| 第 15 阶段 | AI 评测体系增强 | 已增加 Top1/Top3/TopK 命中率、source coverage、疑似幻觉、意图准确率、工具准确率、安全动作准确率、延迟和估算 Token 成本报告 |
 | 第 16 阶段 | Offer / Order 业务域增强 | 新增商品 offer、订单 order 的业务工具、业务服务契约和测试，保持 AI 服务不直连业务库 |
 | 第 17 阶段 | 性能与可观测性增强 | 增加 Prometheus-compatible `/metrics`、性能报告、trace latency 字段和压测报告模板，为真实监控平台接入做准备 |
 | 第 18 阶段 | 最终面试演示闭环 | 统一 README、简历映射、演示脚本、评测报告、压测报告和面试讲解口径，形成完整交付包 |
@@ -143,3 +143,9 @@
 ## 第 14 阶段补齐能力
 
 第 14 阶段补齐了简历中 RAG 检索优化相关的工程结构：中文句末零宽断言分块、多候选召回、MMR、多样性重排、Reranker 抽象、BGE Embedding provider、BGE/OpenAI-compatible reranker 接入点、Milvus 可配置适配，以及可观测 trace 字段。当前仍需真实 Milvus、BGE 模型或企业 rerank 网关配合，才能证明生产指标。
+
+## 第 15 阶段补齐能力
+
+第 15 阶段把第 10 阶段基础 eval 扩展为本地离线评测体系：数据集支持 `scenario`、`expected_sources`、`expected_top_k`、`expected_rerank`；指标支持 Top1/Top3/TopK、source coverage、Rerank 期望、intent、tool、安全动作、简化疑似幻觉、延迟、估算 Token 和估算成本；报告同时输出 JSON 和 Markdown，并单独说明生产项目指标口径。
+
+需要强调：本地 Demo 使用小样本和 mock/fallback，评测报告用于证明工程闭环和指标口径，不代表简历中生产项目历史指标。
