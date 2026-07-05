@@ -29,6 +29,7 @@ REQUIRED_SCRIPTS = [
     "scripts/run_eval.ps1",
     "scripts/demo_check.sh",
     "scripts/demo_check.ps1",
+    "scripts/final_demo_check.py",
 ]
 
 
@@ -36,7 +37,7 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_phase12_docs_exist_and_are_not_empty():
+def test_delivery_docs_exist_and_are_not_empty():
     for path in REQUIRED_DOCS:
         doc = ROOT / path
         assert doc.exists(), f"{path} 不存在"
@@ -74,6 +75,9 @@ def test_readme_is_interview_project_guide():
     assert "不是普通 ChatBot" in content
     assert "mock/fallback" in content
     assert "docs/resume_mapping.md" in content
+    assert "第 18 阶段" in content
+    assert "最终面试演示闭环" in content
+    assert "scripts/final_demo_check.py" in content
 
 
 def test_interview_guide_covers_required_talking_points():
@@ -90,6 +94,8 @@ def test_interview_guide_covers_required_talking_points():
         "权限、安全、审计怎么讲",
         "RocketMQ placeholder 怎么讲",
         "trace/eval 怎么讲",
+        "load report 怎么讲",
+        "Prometheus-compatible metrics 怎么讲",
         "性能优化与部署怎么讲",
         "如何解释生产项目与当前仓库差异",
         "项目难点怎么讲",
@@ -117,9 +123,11 @@ def test_demo_script_has_five_business_cases_and_verification_points():
         assert observable in content
     assert "演示能力与真实接入边界" in content
     assert "后续真实接入能力" in content
+    for capability in ["Memory", "RBAC", "Safety", "Event", "Trace", "Metrics", "Eval Report", "Load Report"]:
+        assert capability in content
 
 
-def test_resume_mapping_covers_phase13_alignment_and_real_integration_roadmap():
+def test_resume_mapping_covers_final_alignment_and_real_integration_roadmap():
     content = _read("docs/resume_mapping.md")
     required_sections = [
         "## 简历项目概述",
@@ -134,13 +142,15 @@ def test_resume_mapping_covers_phase13_alignment_and_real_integration_roadmap():
         "## 面试讲解口径",
         "## 禁止夸大说明",
         "## 第 14-18 阶段真实接入路线图",
-        "## 第 13 阶段验收口径",
+        "## 第 18 阶段最终交付口径",
     ]
     for section in required_sections:
         assert section in content
     for keyword in ["Milvus", "BGE", "Reranker", "RocketMQ", "Offer / Order", "Prometheus-compatible"]:
         assert keyword in content
-    assert "真实接入优先，fallback 保底" in content
+    assert "fallback" in content
+    assert "第 18 阶段" in content
+    assert "已完成" in content
 
 
 def test_mermaid_diagrams_are_present_in_delivery_docs():
@@ -163,7 +173,13 @@ def test_delivery_scripts_exist_and_keep_simple_boundaries():
         script = ROOT / path
         assert script.exists(), f"{path} 不存在"
         content = script.read_text(encoding="utf-8")
-        assert "uvicorn" in content or "pytest" in content or "run_eval.py" in content or "smoke_test.py" in content
+        assert (
+            "uvicorn" in content
+            or "pytest" in content
+            or "run_eval.py" in content
+            or "smoke_test.py" in content
+            or "run_final_demo_check" in content
+        )
         assert "supervisor" not in content.lower()
         assert "systemctl" not in content.lower()
 
@@ -184,16 +200,38 @@ def test_docs_do_not_overstate_demo_capabilities():
         "当前仓库已连接 Redis Cluster",
         "当前仓库已连接 Prometheus",
         "当前仓库支持 5 万并发",
+        "本地 Demo 支持生产级高并发",
+        "默认已接入真实 Milvus",
+        "默认已接入真实 RocketMQ",
+        "默认已接入真实 Spring Boot",
     ]
     for phrase in forbidden_phrases:
         assert phrase not in combined
 
 
-def test_phase13_docs_keep_resume_mapping_entrypoints_consistent():
+def test_phase18_docs_keep_final_demo_entrypoints_consistent():
     assert "简历映射说明" in _read("README.md")
     assert "如何解释生产项目与当前仓库差异" in _read("docs/interview_guide.md")
     assert "演示能力与真实接入边界" in _read("docs/demo_script.md")
-    assert "简历映射自检" in _read("docs/checklist.md")
+    assert "第 18 阶段最终面试交付自检清单" in _read("docs/checklist.md")
+    assert "python scripts/final_demo_check.py" in _read("docs/demo_script.md")
+    assert "python scripts/final_demo_check.py" in _read("README.md")
     prompts = _read("docs/codex_phase_prompts.md")
     for stage in ["第 13 阶段", "第 14 阶段", "第 15 阶段", "第 16 阶段", "第 17 阶段", "第 18 阶段"]:
         assert stage in prompts
+
+
+def test_final_demo_check_script_covers_phase18_key_links():
+    content = _read("scripts/final_demo_check.py")
+    for keyword in [
+        "rag_sources",
+        "tool_package",
+        "memory_followup",
+        "event_ticket_created",
+        "rbac_audit_order",
+        "safety_block",
+        "metrics",
+        "/api/traces/",
+        "SAFETY_REVIEW_REQUIRED",
+    ]:
+        assert keyword in content

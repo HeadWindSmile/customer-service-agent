@@ -2,7 +2,7 @@
 
 ## 目标
 
-第 11 阶段已经让项目具备本地部署和面试演示能力。第 12 阶段只整理启动方式，不引入复杂进程管理。
+第 11 阶段已经让项目具备本地部署和面试演示能力。第 18 阶段只整理最终演示闭环和验证命令，不引入复杂进程管理。
 
 ## Docker Compose 部署图
 
@@ -84,6 +84,7 @@ Compose 默认启动：
 | `scripts/run_tests.ps1` | Windows 运行 pytest |
 | `scripts/run_eval.sh` | Linux/macOS 运行评测 |
 | `scripts/demo_check.ps1` | Windows 演示前核心检查 |
+| `scripts/final_demo_check.py` | 第 18 阶段最终演示轻量闭环检查 |
 | `scripts/smoke_test.py` | 服务启动后的冒烟验证 |
 | `scripts/simple_load_test.py` | 本地小规模并发验证，输出 JSON/Markdown 性能报告 |
 

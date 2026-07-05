@@ -4,7 +4,7 @@
 
 这是一个用于 Agent 开发岗位面试展示的企业级 AI 客服问答系统 Demo。它不是普通 ChatBot，而是在原有 Java/Spring Boot 主业务系统旁边新增一层 Python/FastAPI AI 服务，模拟“业务微服务 + AI 服务层（LLM + Agent）”融合架构。
 
-当前已完成第 17 阶段：性能与可观测性增强。项目默认本地模式不依赖真实 LLM、真实 Milvus、真实 BGE、真实 Reranker、真实 RocketMQ、真实 Redis、真实数据库或外部监控平台，可以用 mock/fallback 跑通完整主链路；评测和压测报告会区分“本地 Demo 结果”和“生产项目指标口径”。第 17 阶段新增 Prometheus-compatible `/metrics`、trace latency breakdown 和 JSON/Markdown 本地性能报告，为后续接入真实监控平台做准备。
+当前已完成第 18 阶段：最终面试演示闭环。项目默认本地模式不依赖真实 LLM、真实 Milvus、真实 BGE、真实 Reranker、真实 RocketMQ、真实 Redis、真实数据库或外部监控平台，可以用 mock/fallback 跑通完整主链路；README、简历映射、演示脚本、评测报告、压测报告、启动验证命令和面试讲解口径已统一整理。所有评测和压测报告都只代表本地 Demo 验证，不冒充生产项目指标。
 
 ## 背景痛点
 
@@ -71,7 +71,7 @@ app/
   observability/     trace、日志、metrics-lite、metrics 文本导出、LLM usage
   health/            health/ready 依赖检查
 data/knowledge/      客服知识库 Markdown
-docs/                第 12 阶段面试交付材料
+docs/                最终面试交付材料
 evals/               离线评测数据集、指标与报告
 mock_business_service/ 模拟原有 Spring Boot 内部业务服务
 scripts/             入库、冒烟、评测、演示辅助脚本
@@ -262,6 +262,7 @@ http://127.0.0.1:8000/docs
 ```bash
 pytest
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000
+python scripts/final_demo_check.py --base-url http://127.0.0.1:8000
 python evals/run_eval.py --base-url http://127.0.0.1:8000
 python scripts/simple_load_test.py --base-url http://127.0.0.1:8000 --scenario mixed --concurrency 5 --total-requests 20 --report reports/load_test_report.json --markdown-report reports/load_test_report.md
 ```
@@ -271,7 +272,20 @@ Windows：
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run_tests.ps1
 powershell -ExecutionPolicy Bypass -File scripts/demo_check.ps1
+python scripts/final_demo_check.py --base-url http://127.0.0.1:8000
 ```
+
+最终演示建议按以下顺序执行：
+
+```bash
+pytest
+uvicorn app.main:app --reload
+python scripts/final_demo_check.py --base-url http://127.0.0.1:8000
+python evals/run_eval.py --base-url http://127.0.0.1:8000
+python scripts/simple_load_test.py --base-url http://127.0.0.1:8000 --scenario mixed --concurrency 5 --total-requests 20 --report reports/phase18_load_test.json --markdown-report reports/phase18_load_test.md
+```
+
+`scripts/final_demo_check.py` 只做最终演示前的轻量链路检查：health、ready、RAG、Tools、Memory、RBAC、Safety、Event、Trace 和 `/metrics`。eval 与 load report 仍由独立脚本生成，避免把冒烟检查变成重型压测。
 
 ## Demo 案例
 
@@ -326,7 +340,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 
 ## 简历映射说明
 
-第 13 阶段新增 [docs/resume_mapping.md](docs/resume_mapping.md)，用于把简历中的生产项目能力、当前仓库已实现能力、mock/fallback/placeholder 边界和第 14-18 阶段真实接入路线逐项对齐。第 14 阶段已补齐 RAG 检索增强代码结构；第 15 阶段已补齐 TopK、source coverage、疑似幻觉、意图、工具、安全、延迟和估算 Token/成本评测报告；第 17 阶段已补齐 `/metrics`、trace latency breakdown 和本地性能报告。面试时仍需说明本地默认不强制依赖真实外部服务，也不要把生产项目指标写成本地 Demo 结果。
+最终简历映射见 [docs/resume_mapping.md](docs/resume_mapping.md)，用于把简历中的生产项目能力、当前仓库已实现能力、mock/fallback/placeholder 边界和后续真实接入路线逐项对齐。第 14 阶段已补齐 RAG 检索增强代码结构；第 15 阶段已补齐 TopK、source coverage、疑似幻觉、意图、工具、安全、延迟和估算 Token/成本评测报告；第 16 阶段已补齐 Offer / Order 基础业务域；第 17 阶段已补齐 `/metrics`、trace latency breakdown 和本地性能报告；第 18 阶段已把 README、演示脚本、评测报告、压测报告和面试讲解口径整理成最终闭环。面试时仍需说明本地默认不强制依赖真实外部服务，也不要把生产项目指标写成本地 Demo 结果。
 
 ## 项目阶段
 
@@ -347,7 +361,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 15. AI 评测体系增强：TopK、疑似幻觉、意图、工具、安全、延迟、Token 成本
 16. Offer / Order 业务域增强：已新增 offer_query、offer_recommend、order_query、OfferTool、OrderTool、业务服务契约、RBAC、审计和测试
 17. 性能与可观测性增强：已新增 Prometheus-compatible `/metrics`、JSON/Markdown 性能报告、trace latency breakdown
-18. 最终面试演示闭环
+18. 最终面试演示闭环：已统一 README、简历映射、演示脚本、评测报告、压测报告、启动验证命令和面试讲解口径
 
 ## 后续可扩展方向
 

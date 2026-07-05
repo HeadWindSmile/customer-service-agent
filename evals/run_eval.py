@@ -66,7 +66,7 @@ def _fetch_trace(client: httpx.Client, trace_id: str | None) -> dict[str, Any] |
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="运行第十阶段 AI 客服离线评测。")
+    parser = argparse.ArgumentParser(description="运行 AI 客服本地离线评测并生成最终演示报告。")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="本地 AI 服务地址。")
     parser.add_argument("--dataset", default=str(DEFAULT_DATASET), help="JSONL 评测数据集路径。")
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR), help="评测报告输出目录。")

@@ -14,7 +14,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 17 阶段：性能与可观测性增强",
+        description="第 18 阶段：最终面试演示闭环",
     )
     app.middleware("http")(_record_metrics_middleware)
     app.include_router(health_router)
