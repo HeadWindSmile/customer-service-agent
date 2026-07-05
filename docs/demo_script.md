@@ -28,9 +28,62 @@ python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 
 1. 现场演示能力：`/api/chat`、RAG、LCEL、Router、Tools、Memory、RBAC、安全、EventBus、trace、eval。
 2. 当前 fallback 能力：MockLLM、MockEmbedding、MockVectorStore、MockBusinessClient、MockEventProducer、metrics-lite。
-3. 后续真实接入能力：第 14 阶段已补 Milvus、BGE、Reranker 的可配置接入点和 fallback；第 16 阶段已补 Offer/Order 基础业务域；后续继续补 RocketMQ 真实 SDK 和 Prometheus-compatible `/metrics`。
+3. 后续真实接入能力：第 14 阶段已补 Milvus、BGE、Reranker 的可配置接入点和 fallback；第 16 阶段已补 Offer/Order 基础业务域；第 17 阶段已补 Prometheus-compatible `/metrics`、trace latency breakdown 和本地性能报告；后续继续补 RocketMQ 真实 SDK 和完整监控平台接入。
 
 如果面试官问简历中的生产指标，需要说明这些指标来自真实生产项目或生产评测体系，当前脚本只用于验证脱敏仓库的可运行链路和演示口径。
+
+## 可观测性演示：metrics 和 trace latency
+
+### 第一步：发起一次业务请求
+
+```bash
+curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/json" -d "{\"user_id\":\"u1001\",\"session_id\":\"demo-observability\",\"role\":\"user\",\"message\":\"查询我的当前套餐\"}"
+```
+
+记录响应中的 `trace_id`。
+
+### 第二步：回放 trace
+
+```bash
+curl.exe "http://127.0.0.1:8000/api/traces/{trace_id}"
+```
+
+重点查看：
+
+```text
+attributes.latency_breakdown
+spans[].name = safety.input / memory.load / intent.classify / router.route / tool.call / event.publish
+attributes.tool_calls
+```
+
+面试解释：trace 用于复盘单次请求，latency breakdown 用于看这一轮请求到底慢在安全检查、记忆、意图识别、RAG、工具调用还是事件发布。
+
+### 第三步：查看 metrics
+
+```bash
+curl.exe "http://127.0.0.1:8000/metrics"
+```
+
+重点查看：
+
+```text
+customer_service_agent_http_requests_total
+customer_service_agent_chat_requests_total
+customer_service_agent_trace_stage_latency_seconds_bucket
+customer_service_agent_tool_calls_total
+customer_service_agent_business_client_requests_total
+customer_service_agent_safety_checks_total
+```
+
+面试解释：`/metrics` 是 Prometheus-compatible 文本接口，便于后续接 Prometheus/Grafana；当前仍是本地单进程 Demo 指标，不代表已经部署完整生产监控平台。
+
+### 第四步：生成本地性能报告
+
+```bash
+python scripts/simple_load_test.py --base-url http://127.0.0.1:8000 --scenario mixed --concurrency 5 --total-requests 20 --report reports/load_test_report.json --markdown-report reports/load_test_report.md
+```
+
+报告会输出 avg、p50、p95、max、success_rate 和 error_rate。演示时必须说明：本地压测只验证链路和报告口径，不代表生产容量承诺。
 
 ## 案例 1：用户咨询套餐规则
 

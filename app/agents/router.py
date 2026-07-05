@@ -8,6 +8,7 @@ from app.agents.prompts import NO_SOURCE_ANSWER
 from app.audit import AuditLogger
 from app.auth.context import AuthContext
 from app.auth.rbac import ForbiddenError, Permission, PermissionChecker
+from app.observability.metrics import metrics_recorder
 from app.observability.tracing import add_attribute, add_event, end_span, get_current_trace, start_span
 from app.rag.retriever import KnowledgeRetriever
 from app.safety.guard import TOOL_PARAM_BLOCKED_ANSWER, SafetyGuard, SafetyViolation
@@ -604,6 +605,11 @@ class CustomerRouter:
         }
         add_attribute("rag_retrieval", source_summary)
         add_event("rag.retrieved", source_summary)
+        metrics_recorder.record_rag_retrieval(
+            scenario=scenario,
+            cache_hit=cache_hit,
+            source_count=len(sources),
+        )
         end_span(retrieve_span)
         if not sources:
             return RouteResult(answer=NO_SOURCE_ANSWER, rewritten_query=search_query)

@@ -10,6 +10,7 @@ from app.events.event_type import EventType
 from app.memory.factory import create_memory_store
 from app.memory.manager import ConversationMemoryManager
 from app.observability.logger import log_event
+from app.observability.metrics import metrics_recorder
 from app.observability.trace_repository import TraceRepository
 from app.observability.tracing import TraceContext, add_event, get_current_trace, reset_current_trace, set_current_trace
 from app.safety.guard import INPUT_BLOCKED_ANSWER, INPUT_REVIEW_ANSWER, OUTPUT_BLOCKED_ANSWER, SafetyGuard, SafetyViolation
@@ -305,6 +306,7 @@ class CustomerAgent:
         finally:
             trace.add_attribute("latency_ms", trace.latency_ms)
             trace.finish(error=str(trace.attributes.get("error") or "") or None)
+            self._record_trace_metrics(trace)
             self.trace_repository.save(trace)
             reset_current_trace(trace_token)
 
@@ -413,6 +415,54 @@ class CustomerAgent:
         existing.append(result)
         trace.add_attribute("event_publish_result", existing)
         add_event("event.publish", result)
+
+    def _record_trace_metrics(self, trace: TraceContext) -> None:
+        """从完整 trace 汇总指标。
+
+        这样 metrics 不需要反向理解业务细节，只消费 trace 和响应事实；后续替换监控
+        SDK 时也能保持主编排层的调用点稳定。
+        """
+
+        attributes = trace.attributes
+        intent = str(attributes.get("intent") or "unknown")
+        error_type = str(attributes.get("error") or "") or None
+        metrics_recorder.record_chat_request(intent=intent, latency_ms=trace.latency_ms, error_type=error_type)
+        metrics_recorder.record_intent_classification(
+            intent=intent,
+            result="low_confidence" if attributes.get("fallback") == "low_confidence" else "classified",
+        )
+
+        for safety_key in ("input_safety", "output_safety", "tool_param_safety"):
+            safety_payload = attributes.get(safety_key)
+            if isinstance(safety_payload, dict):
+                metrics_recorder.record_safety_check(
+                    scope=str(safety_payload.get("scope") or safety_key.replace("_safety", "")),
+                    action=str(safety_payload.get("action") or "unknown"),
+                    risk_level=str(safety_payload.get("risk_level") or "unknown"),
+                    review_queued=bool(safety_payload.get("review_queued")),
+                )
+
+        for call in attributes.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            metrics_recorder.record_tool_call(
+                tool_name=str(call.get("tool_name") or "unknown"),
+                success=bool(call.get("success")),
+                latency_ms=float(call.get("latency_ms") or 0.0),
+            )
+
+        breakdown = attributes.get("latency_breakdown")
+        if isinstance(breakdown, dict):
+            stages = breakdown.get("stages")
+            if isinstance(stages, dict):
+                for stage, payload in stages.items():
+                    if not isinstance(payload, dict) or int(payload.get("count") or 0) <= 0:
+                        continue
+                    metrics_recorder.record_trace_stage_latency(
+                        stage=str(stage),
+                        status=str(payload.get("status") or "unknown"),
+                        latency_ms=float(payload.get("latency_ms") or 0.0),
+                    )
 
 
 def _safety_payload(*results: SafetyResult | None) -> dict[str, object] | None:

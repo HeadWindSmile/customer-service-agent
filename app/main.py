@@ -3,6 +3,7 @@ from time import perf_counter
 
 from app.api.chat import router as chat_router
 from app.api.health import router as health_router
+from app.api.metrics import router as metrics_router
 from app.api.traces import router as traces_router
 from app.config import settings
 from app.observability.metrics import metrics_recorder
@@ -13,10 +14,11 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="第 11 阶段：性能优化与部署",
+        description="第 17 阶段：性能与可观测性增强",
     )
     app.middleware("http")(_record_metrics_middleware)
     app.include_router(health_router)
+    app.include_router(metrics_router)
     app.include_router(chat_router)
     app.include_router(traces_router)
     return app

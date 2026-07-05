@@ -3,6 +3,7 @@ from collections import OrderedDict
 from time import monotonic
 
 from app.config import settings
+from app.observability.metrics import metrics_recorder
 from app.schemas.chat import Source
 
 
@@ -24,12 +25,15 @@ class RagSearchCache:
         key = self._key(query, top_k, variant)
         item = self._items.get(key)
         if item is None:
+            metrics_recorder.record_cache_event(cache_name="rag_search", result="miss", size=len(self._items))
             return None
         expires_at, sources = item
         if expires_at < monotonic():
             self._items.pop(key, None)
+            metrics_recorder.record_cache_event(cache_name="rag_search", result="expired", size=len(self._items))
             return None
         self._items.move_to_end(key)
+        metrics_recorder.record_cache_event(cache_name="rag_search", result="hit", size=len(self._items))
         return [source.model_copy(deep=True) for source in sources]
 
     def set(self, query: str, top_k: int, sources: list[Source], variant: str = "") -> None:
@@ -40,9 +44,12 @@ class RagSearchCache:
         self._items.move_to_end(key)
         while len(self._items) > self.max_size:
             self._items.popitem(last=False)
+            metrics_recorder.record_cache_event(cache_name="rag_search", result="evicted", size=len(self._items))
+        metrics_recorder.record_cache_event(cache_name="rag_search", result="set", size=len(self._items))
 
     def clear(self) -> None:
         self._items.clear()
+        metrics_recorder.record_cache_event(cache_name="rag_search", result="clear", size=0)
 
     def _key(self, query: str, top_k: int, variant: str = "") -> str:
         normalized = " ".join(query.strip().lower().split())

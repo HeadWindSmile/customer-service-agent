@@ -8,6 +8,7 @@ from uuid import uuid4
 import httpx
 
 from app.config import settings
+from app.observability.metrics import metrics_recorder
 
 
 class BusinessClientError(Exception):
@@ -422,7 +423,18 @@ class HttpBusinessClient(BusinessClient):
         json: dict[str, Any] | None = None,
         retry: bool = False,
     ) -> dict[str, Any]:
+        operation = _operation_name(method, path)
+        started = monotonic()
+        client_type = type(self).__name__
         if self._is_circuit_open():
+            metrics_recorder.record_business_client_circuit_open(operation=operation, client_type=client_type)
+            metrics_recorder.record_business_client_request(
+                operation=operation,
+                client_type=client_type,
+                result="circuit_open",
+                latency_ms=_elapsed_since_ms(started),
+                error_code="BUSINESS_CIRCUIT_OPEN",
+            )
             raise BusinessClientError(
                 "业务服务连续失败，短时间内已熔断。",
                 error_code="BUSINESS_CIRCUIT_OPEN",
@@ -436,19 +448,45 @@ class HttpBusinessClient(BusinessClient):
                 response = await client.request(method, path, params=params, json=json)
                 if response.status_code >= 500 and index + 1 < attempts:
                     self._record_failure()
+                    metrics_recorder.record_business_client_retry(operation=operation, client_type=client_type)
                     await self._sleep_before_retry(index)
                     continue
                 if response.status_code >= 400:
                     if response.status_code >= 500:
                         self._record_failure()
-                    raise self._build_error(response)
+                    error = self._build_error(response)
+                    metrics_recorder.record_business_client_request(
+                        operation=operation,
+                        client_type=client_type,
+                        result="error",
+                        latency_ms=_elapsed_since_ms(started),
+                        error_code=error.error_code,
+                        status_code=response.status_code,
+                    )
+                    raise error
                 self._record_success()
+                metrics_recorder.record_business_client_request(
+                    operation=operation,
+                    client_type=client_type,
+                    result="success",
+                    latency_ms=_elapsed_since_ms(started),
+                    status_code=response.status_code,
+                )
                 return response.json()
             except httpx.TimeoutException as exc:
                 self._record_failure()
                 if index + 1 < attempts:
+                    metrics_recorder.record_business_client_retry(operation=operation, client_type=client_type)
                     await self._sleep_before_retry(index)
                     continue
+                metrics_recorder.record_business_client_timeout(operation=operation, client_type=client_type)
+                metrics_recorder.record_business_client_request(
+                    operation=operation,
+                    client_type=client_type,
+                    result="timeout",
+                    latency_ms=_elapsed_since_ms(started),
+                    error_code="BUSINESS_TIMEOUT",
+                )
                 raise BusinessClientError(
                     "业务服务调用超时。",
                     error_code="BUSINESS_TIMEOUT",
@@ -457,13 +495,28 @@ class HttpBusinessClient(BusinessClient):
             except httpx.TransportError as exc:
                 self._record_failure()
                 if index + 1 < attempts:
+                    metrics_recorder.record_business_client_retry(operation=operation, client_type=client_type)
                     await self._sleep_before_retry(index)
                     continue
+                metrics_recorder.record_business_client_request(
+                    operation=operation,
+                    client_type=client_type,
+                    result="transport_error",
+                    latency_ms=_elapsed_since_ms(started),
+                    error_code="BUSINESS_SERVICE_UNAVAILABLE",
+                )
                 raise BusinessClientError(
                     "业务服务暂不可用。",
                     error_code="BUSINESS_SERVICE_UNAVAILABLE",
                     retriable=True,
                 ) from exc
+        metrics_recorder.record_business_client_request(
+            operation=operation,
+            client_type=client_type,
+            result="error",
+            latency_ms=_elapsed_since_ms(started),
+            error_code="BUSINESS_CLIENT_ERROR",
+        )
         raise BusinessClientError("业务服务调用失败。", retriable=True)
 
     def _get_client(self) -> httpx.AsyncClient:
@@ -536,6 +589,37 @@ def create_business_client() -> BusinessClient:
             timeout_ms=settings.business_service_timeout_ms,
         )
     return MockBusinessClient()
+
+
+def _elapsed_since_ms(started: float) -> float:
+    return round((monotonic() - started) * 1000, 2)
+
+
+def _operation_name(method: str, path: str) -> str:
+    """把具体 URL 收敛成低基数 operation，避免用户 ID 或订单号进入指标标签。"""
+
+    normalized = path.lower()
+    if normalized.endswith("/package") and method.upper() == "GET":
+        return "query_user_package"
+    if normalized.endswith("/package/change"):
+        return "change_package"
+    if normalized.endswith("/bill"):
+        return "query_bill"
+    if normalized.endswith("/offers") and method.upper() == "GET":
+        return "query_available_offers"
+    if normalized.endswith("/offers/recommend"):
+        return "recommend_offers"
+    if normalized.endswith("/orders") and method.upper() == "GET":
+        return "query_recent_orders"
+    if "/orders/" in normalized:
+        return "query_order"
+    if normalized == "/internal/tickets" and method.upper() == "POST":
+        return "create_ticket"
+    if normalized.startswith("/internal/tickets/"):
+        return "query_ticket"
+    if normalized.startswith("/internal/users/") and method.upper() == "GET":
+        return "query_user_profile"
+    return f"{method.lower()}_business_request"
 
 
 def _public_offer(offer: dict[str, Any]) -> dict[str, Any]:

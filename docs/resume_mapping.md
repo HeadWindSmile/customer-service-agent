@@ -4,7 +4,7 @@
 
 本项目对应简历中的企业级 AI 客服问答系统：在原有 Java/Spring Boot 业务系统旁边建设 Python/FastAPI AI 服务层，形成“业务微服务 + AI 服务层（LLM + Agent）”融合架构，面向用户和客服人员提供业务咨询、套餐办理、故障排查、售后服务等场景能力。
 
-第 13 阶段的目标不是新增业务功能，而是把简历中的生产项目能力、当前仓库已落地能力、仍处于 mock/fallback/placeholder 的能力、以及第 14-18 阶段真实接入路线统一整理出来。第 14 阶段已完成 RAG 真实检索增强的代码结构，第 15 阶段已完成本地 AI 评测体系增强，第 16 阶段已完成 Offer / Order 基础业务域增强；继续遵循“真实接入优先，fallback 保底”：外部系统可用时优先走真实 Milvus/BGE/Reranker/业务服务接入点，本地最小模式仍可降级运行。
+第 13 阶段的目标不是新增业务功能，而是把简历中的生产项目能力、当前仓库已落地能力、仍处于 mock/fallback/placeholder 的能力、以及第 14-18 阶段真实接入路线统一整理出来。第 14 阶段已完成 RAG 真实检索增强的代码结构，第 15 阶段已完成本地 AI 评测体系增强，第 16 阶段已完成 Offer / Order 基础业务域增强，第 17 阶段已完成本地性能与可观测性增强；继续遵循“真实接入优先，fallback 保底”：外部系统可用时优先走真实 Milvus/BGE/Reranker/业务服务接入点，本地最小模式仍可降级运行。
 
 ## 当前仓库与简历能力总览
 
@@ -17,7 +17,7 @@
 | 会话记忆 | Redis Cluster、分布式会话隔离 | 已有 RedisMemory 可选、memory fallback、summary、key_facts | 后续增强 Redis Cluster 配置说明和原子会话操作 |
 | 业务融合 | Spring Boot、MySQL 8.0、业务 API、RocketMQ | 已有 BusinessClient、HTTP client、mock_business_service、Offer/Order 基础业务域、EventBus | 后续补真实业务服务联调、MQ 接入路径和更复杂订单写操作 |
 | 权限安全 | RBAC、审计、内容安全、人工审核 | 已有 RBAC、audit、输入/输出/工具参数安全、review_queue | 后续补真实语义安全模型或样本库接入点 |
-| 评测观测 | 准确率、幻觉率、时延、Token 成本、trace | 已有 trace、metrics-lite、evals、TopK/source coverage/工具/安全/延迟/估算 token cost 报告 | 第 17 阶段补 Prometheus-compatible `/metrics` |
+| 评测观测 | 准确率、幻觉率、时延、Token 成本、trace | 已有 trace、latency breakdown、metrics-lite、Prometheus-compatible `/metrics`、evals、TopK/source coverage/工具/安全/延迟/估算 token cost 报告 | 后续接真实监控平台和在线质检闭环 |
 
 ## 技术栈映射表
 
@@ -35,7 +35,7 @@
 | MySQL 8.0 | 当前通过 mock 业务服务模拟业务数据 | 尚未真实接入 | 第 16 阶段通过业务服务边界补 order/offer，不让 AI 直连业务库 |
 | Spring Boot | `mock_business_service` 模拟内部 API | 当前为 FastAPI mock 服务 | 后续保留 HTTP 契约，替换为真实业务服务 |
 | RocketMQ | `EventBus`、`RocketMQProducer` placeholder | 有事件模型和占位 producer | 后续补真实 SDK，失败降级 jsonl |
-| Prometheus/Grafana/OTel | `metrics-lite`、trace 文件 | 当前为轻量本地观测 | 第 17 阶段补 Prometheus-compatible `/metrics`，不默认依赖外部平台 |
+| Prometheus/Grafana/OTel | `metrics-lite`、`/metrics`、trace 文件 | 当前为轻量本地观测，未默认启动外部监控平台 | 后续用真实 Prometheus/Grafana/OTel Collector 承接 |
 
 ## 核心职责映射表
 
@@ -49,7 +49,7 @@
 | Prompt、召回、TopK、Rerank 优化 | prompt 强约束、top_k、sources 兜底、缓存、Top1/Top3/TopK 本地评测 | 真实 Reranker 对比报告 |
 | AI 评测体系 | intent、关键词、sources、source coverage、tool、安全、疑似幻觉、延迟、估算 Token 成本 | 生产评测集、在线反馈和人工质检闭环 |
 | RBAC 与基础业务模块 | user/package/bill/ticket/offer/order、RBAC、audit | 更复杂订单写操作和真实权限中心对接 |
-| 性能调优和稳定性 | HTTP 连接复用、retry/backoff、circuit breaker、cache、metrics-lite | 性能报告、Prometheus-compatible metrics、真实压测口径 |
+| 性能调优和稳定性 | HTTP 连接复用、retry/backoff、circuit breaker、cache、metrics-lite | 已有 JSON/Markdown 本地性能报告、Prometheus-compatible metrics、真实压测边界说明 | 生产压测仍需独立环境和真实监控 |
 
 ## 成果指标映射表
 
@@ -60,7 +60,7 @@
 | 幻觉率 30% -> 5% 以下 | 生产问答质检指标 | 当前有 sources 为空不生成、prompt 约束、简化疑似幻觉检测 | 本地只说明策略和疑似检测，不冒充生产质检指标 |
 | 多轮追问准确率 92% | 生产多轮评测 | 当前有 query rewrite、summary、key_facts 测试 | 后续补多轮评测集 |
 | 意图准确率 72% -> 95% | 生产意图评测 | 当前有 15 类 intent 和分场景 eval | 本地小样本结果不等同生产意图评测 |
-| 平均延迟 4.8s -> 2.7s | 生产 Prometheus 统计 | 当前有 latency、metrics-lite、本地压测脚本 | 不宣称本地达到生产容量 |
+| 平均延迟 4.8s -> 2.7s | 生产 Prometheus 统计 | 当前有 latency breakdown、metrics-lite、`/metrics`、本地压测报告 | 不宣称本地达到生产容量 |
 | 内容安全拦截率 100% | 生产安全样本库指标 | 当前有规则、正则、Mock 语义检测和 review_queue | 后续补真实语义检测或样本评测 |
 | 问题定位效率提升 83% | 生产运维指标 | 当前 trace 可回放单次链路 | 本地证明可观测字段和回放能力 |
 | 业务价值提升 | 生产运营指标 | 当前不能由仓库直接证明 | 面试中作为生产项目结果，不作为本地验收结论 |
@@ -75,7 +75,7 @@
 6. Tools 层已通过 `BusinessClient` 隔离业务系统，支持套餐、账单、用户、工单、Offer 和 Order 能力。
 7. Memory 层已支持 memory/Redis 可选、最近 8 轮、summary、key_facts 和指代消解。
 8. Safety 层已覆盖输入、输出和工具参数安全，并把中高风险写入本地 review_queue。
-9. Observability 层已支持 trace、span、event、attribute、metrics-lite、LLM usage 估算和 trace 回放。
+9. Observability 层已支持 trace、span、event、attribute、latency breakdown、metrics-lite、Prometheus-compatible `/metrics`、LLM usage 估算和 trace 回放。
 10. Evals 已支持离线数据集、scenario 标签、expected_sources、expected_top_k、expected_rerank、Top1/Top3/TopK、source coverage、intent、工具、安全、简化疑似幻觉、延迟和估算 Token/成本报告。
 
 ## 当前 mock / fallback / placeholder 能力
@@ -92,7 +92,7 @@
 | Memory | 默认 memory，Redis 可选 | 接入 Redis Cluster 配置与原子操作策略 |
 | Event | MockEventProducer，RocketMQProducer 占位 | 接入真实 RocketMQ SDK |
 | Safety Semantic | MockSemanticDetector | 接入真实安全审核模型或样本库评测 |
-| Metrics | metrics-lite | 增加 Prometheus-compatible `/metrics` |
+| Metrics | metrics-lite、Prometheus-compatible `/metrics` | 后续接真实 Prometheus/Grafana/OTel 平台 |
 
 ## 需要真实接入的能力清单
 
@@ -102,7 +102,7 @@
 4. Redis Cluster：补 Cluster URL/节点配置、Lua/事务式会话操作策略和降级说明。
 5. RocketMQ：补真实 Producer SDK、topic/tag/key、发送失败隔离和本地 jsonl fallback。
 6. Offer / Order：已新增基础查询和推荐业务域，AI 服务仍通过业务 API 调用，不直接操作 MySQL；订单取消、创建等写操作可作为后续扩展。
-7. Prometheus-compatible metrics：补 `/metrics` 文本格式，后续可被 Prometheus 抓取。
+7. Prometheus-compatible metrics：已补 `/metrics` 文本格式，后续可被 Prometheus 抓取。
 8. 评测报告：已补 Top1/Top3/TopK、source coverage、Rerank 期望、疑似幻觉、安全、工具、延迟、估算 Token 成本；后续可接生产数据和人工质检。
 
 ## 当前仓库与真实生产项目差距
@@ -113,7 +113,7 @@
 
 可以这样讲：
 
-> 简历中的生产项目是真实接入 Milvus、Redis Cluster、RocketMQ、Spring Boot 和业务库的 AI 客服系统。这个仓库是我把生产项目核心架构脱敏后逐步复现的版本，目前已经跑通 AI 服务层、RAG、LCEL、Router、工具调用、RBAC、安全、事件和 trace，并已通过 BusinessClient 接入 Offer/Order 基础业务域。后续阶段会按真实接入优先、fallback 保底的原则，把 RocketMQ 和 Prometheus-compatible metrics 等能力继续补齐。
+> 简历中的生产项目是真实接入 Milvus、Redis Cluster、RocketMQ、Spring Boot 和业务库的 AI 客服系统。这个仓库是我把生产项目核心架构脱敏后逐步复现的版本，目前已经跑通 AI 服务层、RAG、LCEL、Router、工具调用、RBAC、安全、事件、trace、Prometheus-compatible `/metrics` 和本地性能报告，并已通过 BusinessClient 接入 Offer/Order 基础业务域。后续阶段会按真实接入优先、fallback 保底的原则，把 RocketMQ 真实 SDK、监控平台接入和最终演示闭环继续补齐。
 
 当面试官追问指标时，应说明指标来自生产项目或评测报告，当前仓库能验证的是工程链路、测试用例、本地评测和演示脚本。不要把生产指标说成本地 Demo 自动得出的结果。
 
@@ -133,7 +133,7 @@
 | 第 14 阶段 | RAG 真实检索增强 | 已完成零宽断言句末分块、MMR、多候选召回、Reranker 抽象、BGE provider、Milvus 真实适配，并保留 mock fallback |
 | 第 15 阶段 | AI 评测体系增强 | 已增加 Top1/Top3/TopK 命中率、source coverage、疑似幻觉、意图准确率、工具准确率、安全动作准确率、延迟和估算 Token 成本报告 |
 | 第 16 阶段 | Offer / Order 业务域增强 | 已新增商品 offer、订单 order 的业务工具、业务服务契约、RBAC、审计和测试，保持 AI 服务不直连业务库 |
-| 第 17 阶段 | 性能与可观测性增强 | 增加 Prometheus-compatible `/metrics`、性能报告、trace latency 字段和压测报告模板，为真实监控平台接入做准备 |
+| 第 17 阶段 | 性能与可观测性增强 | 已增加 Prometheus-compatible `/metrics`、JSON/Markdown 性能报告、trace latency breakdown，为真实监控平台接入做准备 |
 | 第 18 阶段 | 最终面试演示闭环 | 统一 README、简历映射、演示脚本、评测报告、压测报告和面试讲解口径，形成完整交付包 |
 
 ## 第 13 阶段验收口径
@@ -155,3 +155,11 @@
 第 16 阶段把 Offer / Order 作为新的业务域接入现有 Agent 主链路：新增 `offer_query`、`offer_recommend`、`order_query` 三类意图，新增 `OfferTool`、`OrderTool`，并在 `BusinessClient`、`HttpBusinessClient`、`MockBusinessClient` 和 `mock_business_service` 中补齐对应契约。
 
 接入边界仍然是：AI 服务只通过业务 API 查询可办理权益、推荐 offer 和订单状态，不直连 MySQL，不在 API 层写业务逻辑。客服代查订单必须经过 RBAC 和 audit；tool_calls 会继续返回权限、安全、审计和耗时字段。
+
+## 第 17 阶段补齐能力
+
+第 17 阶段把本地观测从 `metrics-lite` 扩展到 Prometheus-compatible `/metrics`，覆盖 HTTP、chat、intent、trace stage、tool、BusinessClient、RAG、cache、safety 和 event publish 等基础维度。指标标签只使用低基数字段，不写入 trace_id、user_id、session_id、订单号或原始问题。
+
+trace 中新增 `latency_breakdown`，用于展示 safety、memory、query rewrite、intent classify、auth、router、RAG、tool、output safety、memory save 和 event publish 的耗时构成。`scripts/simple_load_test.py` 支持 `faq`、`package`、`offer`、`order`、`mixed` 场景，并输出 JSON/Markdown 性能报告。
+
+边界说明：当前 `/metrics` 是本进程文本导出接口，本地性能报告只验证 Demo 链路和报告口径，不代表生产容量承诺；Prometheus/Grafana/OTel Collector 仍属于后续真实平台接入。

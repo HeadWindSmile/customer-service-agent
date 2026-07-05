@@ -1722,10 +1722,11 @@ README 增加：
 
 ## 验收标准
 
-1. 新增 Prometheus-compatible `/metrics` 文本接口。
-2. trace 中补齐关键 latency 字段，包括 intent、rag、llm、tool、memory、event。
-3. simple_load_test 输出性能报告 JSON/Markdown。
-4. README 和 interview_guide 说明本地压测不是生产容量承诺。
+1. 新增 Prometheus-compatible `/metrics` 文本接口，保留 `/metrics-lite`。
+2. metrics 覆盖 HTTP、chat、intent、trace stage、tool、BusinessClient、RAG、cache、safety 和 event publish 基础维度。
+3. trace 中补齐 latency breakdown，包括 safety、memory、query rewrite、intent、auth、router、rag、tool、output safety、memory save 和 event。
+4. simple_load_test 支持 `faq`、`package`、`offer`、`order`、`mixed` 场景，并输出性能报告 JSON/Markdown。
+5. README、observability_design、deployment_design、resume_mapping、checklist 和 demo_script 说明本地压测不是生产容量承诺。
 
 ---
 

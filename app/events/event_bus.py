@@ -1,9 +1,11 @@
 from typing import Any
+from time import perf_counter
 
 from app.config import settings
 from app.events.event_schema import Event
 from app.events.event_type import EventType
 from app.events.mock_producer import MockEventProducer
+from app.observability.metrics import metrics_recorder
 from app.events.producer import BaseEventProducer, NoneEventProducer
 from app.events.rocketmq_producer import RocketMQProducer
 from app.observability.logger import log_event
@@ -43,9 +45,16 @@ class EventBus:
                 "producer_type": type(self.producer).__name__,
             },
         )
+        started = perf_counter()
         try:
             sent = await self.producer.send(event)
         except Exception as exc:
+            metrics_recorder.record_event_publish(
+                event_type=event_type.value,
+                producer_type=type(self.producer).__name__,
+                success=False,
+                latency_ms=round((perf_counter() - started) * 1000, 2),
+            )
             add_event(
                 "event.publish_failed",
                 {
@@ -66,7 +75,14 @@ class EventBus:
                 level="warning",
             )
             return False
+        latency_ms = round((perf_counter() - started) * 1000, 2)
         if not sent:
+            metrics_recorder.record_event_publish(
+                event_type=event_type.value,
+                producer_type=type(self.producer).__name__,
+                success=False,
+                latency_ms=latency_ms,
+            )
             add_event(
                 "event.publish_failed",
                 {
@@ -86,6 +102,12 @@ class EventBus:
                 level="warning",
             )
         else:
+            metrics_recorder.record_event_publish(
+                event_type=event_type.value,
+                producer_type=type(self.producer).__name__,
+                success=True,
+                latency_ms=latency_ms,
+            )
             add_event(
                 "event.publish_succeeded",
                 {

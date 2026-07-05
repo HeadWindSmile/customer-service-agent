@@ -21,7 +21,9 @@
 - [ ] `/api/chat` 响应包含 `trace_id`。
 - [ ] `GET /api/traces/{trace_id}` 可查询 trace。
 - [ ] trace 中能看到 intent、sources、tool_calls、safety 和 event publish 摘要。
+- [ ] trace 中能看到 `attributes.latency_breakdown`，包含 safety、memory、intent、router、RAG、tool、event 等阶段耗时。
 - [ ] `GET /metrics-lite` 可返回单进程轻量指标。
+- [ ] `GET /metrics` 可返回 Prometheus-compatible 文本指标。
 
 ## 权限、安全、审计检查
 
@@ -92,6 +94,23 @@
 - [ ] 工具参数继续经过 safety scan，响应和审计中的用户标识会脱敏。
 - [ ] `/api/chat` 至少能跑通查询可办理优惠、推荐 offer、查询订单状态 3 个示例。
 - [ ] 文档明确说明当前是基础业务域接入，不声称支持生产级订单交易能力。
+
+## 第 17 阶段性能与可观测性增强自检
+
+- [ ] `/metrics-lite` 保持原有 JSON 单进程指标。
+- [ ] `/metrics` 返回 Prometheus 0.0.4 文本格式，包含 HELP、TYPE、counter、gauge 和 histogram bucket。
+- [ ] metrics 覆盖 HTTP 请求数、错误数和延迟 bucket。
+- [ ] metrics 覆盖 chat intent、error、端到端延迟和 trace stage 延迟。
+- [ ] metrics 覆盖 tool_calls 的 tool_name、success 和 latency。
+- [ ] metrics 覆盖 BusinessClient 成功、失败、retry、timeout 和 circuit open。
+- [ ] metrics 覆盖 RAG retrieval、cache hit/miss/set、safety check 和 event publish。
+- [ ] metrics 标签不包含 trace_id、user_id、session_id、订单号、原始问题或错误堆栈。
+- [ ] trace latency breakdown 包含 `safety.input`、`memory.load`、`query.rewrite`、`intent.classify`、`auth.build_context`、`router.route`、`rag.retrieve`、`rag.answer`、`tool.call`、`safety.output`、`memory.save`、`event.publish`。
+- [ ] `scripts/simple_load_test.py` 支持 `faq`、`package`、`offer`、`order`、`mixed` 场景。
+- [ ] simple load test 输出 JSON 和 Markdown 报告。
+- [ ] 性能报告包含 avg、p50、p95、max、success_rate、error_rate。
+- [ ] README、observability_design、deployment_design、resume_mapping 和 demo_script 已同步第 17 阶段说明。
+- [ ] 文档明确说明本地压测不代表生产容量承诺。
 
 ## 测试检查
 

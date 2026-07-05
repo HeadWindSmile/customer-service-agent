@@ -4,7 +4,7 @@
 
 这是一个用于 Agent 开发岗位面试展示的企业级 AI 客服问答系统 Demo。它不是普通 ChatBot，而是在原有 Java/Spring Boot 主业务系统旁边新增一层 Python/FastAPI AI 服务，模拟“业务微服务 + AI 服务层（LLM + Agent）”融合架构。
 
-当前已完成第 16 阶段：Offer / Order 业务域增强。项目默认本地模式不依赖真实 LLM、真实 Milvus、真实 BGE、真实 Reranker、真实 RocketMQ、真实 Redis 或真实数据库，可以用 mock/fallback 跑通完整主链路；评测报告会区分“本地 Demo 结果”和“生产项目指标口径”。第 16 阶段已把优惠权益 offer、订单 order 通过 BusinessClient 和 mock 业务服务接入，后续阶段继续按“真实接入优先，fallback 保底”的原则补 Prometheus-compatible metrics。
+当前已完成第 17 阶段：性能与可观测性增强。项目默认本地模式不依赖真实 LLM、真实 Milvus、真实 BGE、真实 Reranker、真实 RocketMQ、真实 Redis、真实数据库或外部监控平台，可以用 mock/fallback 跑通完整主链路；评测和压测报告会区分“本地 Demo 结果”和“生产项目指标口径”。第 17 阶段新增 Prometheus-compatible `/metrics`、trace latency breakdown 和 JSON/Markdown 本地性能报告，为后续接入真实监控平台做准备。
 
 ## 背景痛点
 
@@ -49,10 +49,10 @@ flowchart LR
 | 权限审计 | RBAC、AuditLogger、本地 JSON Lines 审计日志 |
 | 内容安全 | 规则、正则、Mock 语义检测、review queue、脱敏 |
 | 事件机制 | EventBus、MockEventProducer、RocketMQProducer placeholder |
-| 可观测性 | trace/span/event/attribute、trace 回放、metrics-lite、evals |
+| 可观测性 | trace/span/event/attribute、trace 回放、latency breakdown、metrics-lite、Prometheus-compatible `/metrics`、evals |
 | 部署 | Dockerfile、docker-compose、health/ready、smoke/load 脚本 |
 
-说明：Milvus、BGE、BGE-Reranker 已有可配置接入点，但默认本地模式仍走 mock/fallback，不要求启动外部服务。Redis Cluster、真实 RocketMQ、Prometheus/Grafana/OpenTelemetry Collector 仍是后续生产环境可扩展方向。
+说明：Milvus、BGE、BGE-Reranker 已有可配置接入点，但默认本地模式仍走 mock/fallback，不要求启动外部服务。`/metrics` 是本进程文本导出接口，不代表已经部署 Prometheus、Grafana 或 OpenTelemetry Collector。
 
 ## 目录结构
 
@@ -68,7 +68,7 @@ app/
   audit/             审计日志
   safety/            输入、输出、工具参数安全防护
   events/            事件模型、producer 抽象、mock producer、MQ placeholder
-  observability/     trace、日志、metrics-lite、LLM usage
+  observability/     trace、日志、metrics-lite、metrics 文本导出、LLM usage
   health/            health/ready 依赖检查
 data/knowledge/      客服知识库 Markdown
 docs/                第 12 阶段面试交付材料
@@ -197,7 +197,7 @@ AI 服务不直接读写业务数据库。套餐、账单、用户、工单、Of
 
 ## Observability + Eval
 
-每次 `/api/chat` 会生成 `trace_id`，并把 span、event、attribute 写入 `logs/traces/{trace_id}.json`。可通过 `GET /api/traces/{trace_id}` 回放本地 trace。`/metrics-lite` 提供单进程轻量指标；`evals/` 提供离线评测数据集和报告生成。
+每次 `/api/chat` 会生成 `trace_id`，并把 span、event、attribute 写入 `logs/traces/{trace_id}.json`。可通过 `GET /api/traces/{trace_id}` 回放本地 trace；trace 的 `attributes.latency_breakdown` 会展示 safety、memory、intent、router、RAG、tool、event 等阶段耗时构成。`/metrics-lite` 提供单进程 JSON 指标，`/metrics` 提供 Prometheus-compatible 文本指标；`evals/` 提供离线评测数据集和报告生成。
 
 第 15 阶段把基础 eval 扩展为更贴近简历指标的本地评测体系：数据集支持 `scenario`、`expected_sources`、`expected_top_k` 和 `expected_rerank`；指标覆盖 Top1/Top3/TopK、source coverage、简化疑似幻觉、intent、tool、安全动作、延迟、估算 Token 和估算成本。默认报告输出 `evals/reports/latest_report.json` 和 `evals/reports/latest_report.md`，并明确说明本地 Demo 指标不能冒充生产项目结果。
 
@@ -205,7 +205,7 @@ AI 服务不直接读写业务数据库。套餐、账单、用户、工单、Of
 
 ## Performance + Deployment
 
-第 11 阶段提供了 Dockerfile、docker-compose、health/ready、metrics-lite、业务 HTTP client 连接复用、retry/backoff、简化 circuit breaker，以及 RAG sources TTL 缓存。当前只用于本地演示和小规模验证，不给出生产环境容量承诺。
+第 11 阶段提供了 Dockerfile、docker-compose、health/ready、metrics-lite、业务 HTTP client 连接复用、retry/backoff、简化 circuit breaker，以及 RAG sources TTL 缓存。第 17 阶段进一步补充 `/metrics` 文本指标和 `scripts/simple_load_test.py` JSON/Markdown 性能报告。当前只用于本地演示和小规模验证，不给出生产环境容量承诺。
 
 详细说明见 [docs/deployment_design.md](docs/deployment_design.md)。
 
@@ -248,6 +248,7 @@ docker compose ps
 http://127.0.0.1:8000/health
 http://127.0.0.1:8000/ready
 http://127.0.0.1:8000/metrics-lite
+http://127.0.0.1:8000/metrics
 ```
 
 接口文档：
@@ -262,7 +263,7 @@ http://127.0.0.1:8000/docs
 pytest
 python scripts/smoke_test.py --base-url http://127.0.0.1:8000
 python evals/run_eval.py --base-url http://127.0.0.1:8000
-python scripts/simple_load_test.py --base-url http://127.0.0.1:8000 --scenario faq --concurrency 5 --total-requests 20
+python scripts/simple_load_test.py --base-url http://127.0.0.1:8000 --scenario mixed --concurrency 5 --total-requests 20 --report reports/load_test_report.json --markdown-report reports/load_test_report.md
 ```
 
 Windows：
@@ -325,7 +326,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 
 ## 简历映射说明
 
-第 13 阶段新增 [docs/resume_mapping.md](docs/resume_mapping.md)，用于把简历中的生产项目能力、当前仓库已实现能力、mock/fallback/placeholder 边界和第 14-18 阶段真实接入路线逐项对齐。第 14 阶段已补齐 RAG 检索增强代码结构；第 15 阶段已补齐 TopK、source coverage、疑似幻觉、意图、工具、安全、延迟和估算 Token/成本评测报告。面试时仍需说明本地默认不强制依赖真实外部服务，也不要把生产项目指标写成本地 Demo 结果。
+第 13 阶段新增 [docs/resume_mapping.md](docs/resume_mapping.md)，用于把简历中的生产项目能力、当前仓库已实现能力、mock/fallback/placeholder 边界和第 14-18 阶段真实接入路线逐项对齐。第 14 阶段已补齐 RAG 检索增强代码结构；第 15 阶段已补齐 TopK、source coverage、疑似幻觉、意图、工具、安全、延迟和估算 Token/成本评测报告；第 17 阶段已补齐 `/metrics`、trace latency breakdown 和本地性能报告。面试时仍需说明本地默认不强制依赖真实外部服务，也不要把生产项目指标写成本地 Demo 结果。
 
 ## 项目阶段
 
@@ -345,7 +346,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 14. RAG 真实检索增强：零宽断言分块、MMR、Reranker 抽象、BGE、Milvus
 15. AI 评测体系增强：TopK、疑似幻觉、意图、工具、安全、延迟、Token 成本
 16. Offer / Order 业务域增强：已新增 offer_query、offer_recommend、order_query、OfferTool、OrderTool、业务服务契约、RBAC、审计和测试
-17. 性能与可观测性增强：Prometheus-compatible `/metrics`、性能报告、trace latency
+17. 性能与可观测性增强：已新增 Prometheus-compatible `/metrics`、JSON/Markdown 性能报告、trace latency breakdown
 18. 最终面试演示闭环
 
 ## 后续可扩展方向
@@ -355,7 +356,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/chat" -H "Content-Type: application/
 1. Redis Cluster 替换单机 Redis 或 memory fallback。
 2. Milvus 或企业向量库替换本地 mock/chroma vector store，并接入真实 embedding 数据。
 3. 真实 RocketMQ Producer 替换当前 placeholder。
-4. Prometheus、Grafana、OpenTelemetry Collector 接入完整监控链路。
+4. 基于当前 `/metrics` 文本接口继续接入 Prometheus、Grafana、OpenTelemetry Collector 等完整监控链路。
 5. 真实安全审核模型替换 Mock 语义检测。
 6. 用真实 BGE Embedding、BGE-Reranker 或企业 rerank 网关跑可选离线对比评测报告。
 7. Offer / Order 已通过业务微服务 API 边界接入基础查询和推荐能力；后续可扩展订单取消、创建等写操作，但仍不让 AI 服务直连业务库。
