@@ -49,3 +49,41 @@ class TicketResponse(BaseModel):
     description: str = ""
     status: str
     summary: str = ""
+
+
+class OfferResponse(BaseModel):
+    offer_id: str
+    name: str
+    offer_type: str
+    description: str
+    benefits: list[str]
+    monthly_fee_delta: float
+    valid_until: str
+    tags: list[str] = Field(default_factory=list)
+    recommend_reason: str = ""
+
+
+class OfferListResponse(BaseModel):
+    offers: list[OfferResponse]
+
+
+class OfferRecommendRequest(BaseModel):
+    need: str | None = Field(default=None, description="用户诉求，例如流量、通话、会员权益")
+    budget: float | None = Field(default=None, ge=0, description="用户可接受的月增费用")
+
+
+class OrderResponse(BaseModel):
+    order_id: str
+    user_id: str
+    order_type: str
+    title: str
+    status: str
+    created_at: str
+    updated_at: str
+    related_resource_id: str | None = None
+    can_cancel: bool = False
+    summary: str = ""
+
+
+class OrderListResponse(BaseModel):
+    orders: list[OrderResponse]

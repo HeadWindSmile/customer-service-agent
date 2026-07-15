@@ -160,3 +160,22 @@ def test_phase1_fault_example_prefers_fault_source():
 
     assert data["intent"] == "fault_diagnosis"
     assert data["sources"][0]["title"] == "故障排查说明"
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_intent", "expected_tool"),
+    [
+        ("我有哪些可办理优惠权益？", "offer_query", "query_available_offers"),
+        ("我流量不够，预算20元以内，推荐一个优惠", "offer_recommend", "recommend_offers"),
+        ("帮我查订单 ORD-20260701001 的状态", "order_query", "query_order"),
+    ],
+)
+def test_phase16_http_examples_match_expected_intents(message: str, expected_intent: str, expected_tool: str):
+    response = post_chat(message, user_id="u1001", session_id="phase16-http-examples")
+    data = response.json()
+
+    assert_base_response(data)
+    assert data["error"] is None
+    assert data["intent"] == expected_intent
+    assert data["tool_calls"][0]["tool_name"] == expected_tool
+    assert data["tool_calls"][0]["success"] is True

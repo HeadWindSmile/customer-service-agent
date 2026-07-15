@@ -8,6 +8,7 @@ from uuid import uuid4
 import httpx
 
 from app.config import settings
+from app.observability.metrics import metrics_recorder
 
 
 class BusinessClientError(Exception):
@@ -67,6 +68,27 @@ class BusinessClient(ABC):
     async def query_ticket(self, user_id: str, ticket_id: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
+    async def query_available_offers(self, user_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def recommend_offers(
+        self,
+        user_id: str,
+        need: str | None = None,
+        budget: float | None = None,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def query_order(self, user_id: str, order_id: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def query_recent_orders(self, user_id: str, limit: int = 3) -> dict[str, Any]:
+        raise NotImplementedError
+
 
 class MockBusinessClient(BusinessClient):
     """本地 fallback 客户端。
@@ -97,6 +119,85 @@ class MockBusinessClient(BusinessClient):
             ("u1001", "本月"): {"month": "本月", "amount": 156.8, "status": "已出账", "items": ["套餐月费", "流量包"]},
             ("u1002", "本月"): {"month": "本月", "amount": 68.0, "status": "已出账", "items": ["套餐月费", "语音通话"]},
         }
+        self._offers = {
+            "OFF-DATA-20G": {
+                "offer_id": "OFF-DATA-20G",
+                "name": "20GB 流量加油包优惠",
+                "offer_type": "data_booster",
+                "description": "适合本月流量经常不够用的用户，办理后立即生效。",
+                "benefits": ["每月额外 20GB 国内通用流量", "首月按天折算"],
+                "monthly_fee_delta": 19.0,
+                "valid_until": "2026-12-31",
+                "eligible_levels": ["gold", "standard"],
+                "applicable_packages": ["5G畅享套餐", "基础套餐"],
+                "tags": ["流量", "data", "高性价比"],
+                "recommend_reason": "匹配流量不够用诉求，月增费用较低。",
+            },
+            "OFF-MEMBER-VIDEO": {
+                "offer_id": "OFF-MEMBER-VIDEO",
+                "name": "视频会员权益包",
+                "offer_type": "member_benefit",
+                "description": "面向金卡用户开放的视频会员权益优惠。",
+                "benefits": ["月度视频会员权益", "权益到期前短信提醒"],
+                "monthly_fee_delta": 15.0,
+                "valid_until": "2026-10-31",
+                "eligible_levels": ["gold"],
+                "applicable_packages": ["5G畅享套餐", "家庭融合套餐"],
+                "tags": ["权益", "会员", "video"],
+                "recommend_reason": "匹配权益类诉求，当前用户等级可办理。",
+            },
+            "OFF-FAMILY-BUNDLE": {
+                "offer_id": "OFF-FAMILY-BUNDLE",
+                "name": "家庭融合权益升级",
+                "offer_type": "family_bundle",
+                "description": "适合多成员共享流量和宽带权益的家庭用户。",
+                "benefits": ["家庭成员共享流量池", "宽带提速权益"],
+                "monthly_fee_delta": 39.0,
+                "valid_until": "2026-09-30",
+                "eligible_levels": ["gold"],
+                "applicable_packages": ["家庭融合套餐", "5G畅享套餐"],
+                "tags": ["家庭", "宽带", "融合"],
+                "recommend_reason": "匹配家庭共享和宽带权益诉求。",
+            },
+        }
+        self._orders = {
+            "ORD-20260701001": {
+                "order_id": "ORD-20260701001",
+                "user_id": "u1001",
+                "order_type": "offer_subscribe",
+                "title": "20GB 流量加油包优惠办理",
+                "status": "processing",
+                "created_at": "2026-07-01T10:15:00+08:00",
+                "updated_at": "2026-07-01T10:20:00+08:00",
+                "related_resource_id": "OFF-DATA-20G",
+                "can_cancel": True,
+                "summary": "订单已受理，权益预计 10 分钟内生效。",
+            },
+            "PKG-20260630001": {
+                "order_id": "PKG-20260630001",
+                "user_id": "u1001",
+                "order_type": "package_change",
+                "title": "5G畅享套餐变更",
+                "status": "completed",
+                "created_at": "2026-06-30T18:30:00+08:00",
+                "updated_at": "2026-07-01T00:05:00+08:00",
+                "related_resource_id": "5G畅享套餐",
+                "can_cancel": False,
+                "summary": "套餐变更已完成，当前套餐为 5G畅享套餐。",
+            },
+            "ORD-20260702002": {
+                "order_id": "ORD-20260702002",
+                "user_id": "u1002",
+                "order_type": "ticket_service",
+                "title": "宽带售后服务单",
+                "status": "processing",
+                "created_at": "2026-07-02T09:00:00+08:00",
+                "updated_at": "2026-07-02T11:30:00+08:00",
+                "related_resource_id": "TCK-ABC123456",
+                "can_cancel": False,
+                "summary": "售后专员正在跟进，预计 24 小时内反馈。",
+            },
+        }
 
     async def query_user_profile(self, user_id: str) -> dict[str, Any]:
         profile = self._profiles.get(user_id)
@@ -122,8 +223,21 @@ class MockBusinessClient(BusinessClient):
         if target_package not in self._available_packages:
             raise BusinessClientError("目标套餐不存在。", error_code="TARGET_PACKAGE_NOT_FOUND", status_code=404)
         self._packages[user_id] = deepcopy(self._available_packages[target_package])
+        order_id = f"PKG-{uuid4().hex[:10].upper()}"
+        self._orders[order_id] = {
+            "order_id": order_id,
+            "user_id": user_id,
+            "order_type": "package_change",
+            "title": f"{target_package} 变更申请",
+            "status": "submitted",
+            "created_at": "2026-07-04T12:00:00+08:00",
+            "updated_at": "2026-07-04T12:00:00+08:00",
+            "related_resource_id": target_package,
+            "can_cancel": True,
+            "summary": "套餐变更申请已提交，生效时间以业务系统确认为准。",
+        }
         return {
-            "order_id": f"PKG-{uuid4().hex[:10].upper()}",
+            "order_id": order_id,
             "user_id": user_id,
             "target_package": target_package,
             "status": "submitted",
@@ -152,6 +266,63 @@ class MockBusinessClient(BusinessClient):
             "status": "processing",
             "summary": "工单已受理，售后专员正在跟进。",
         }
+
+    async def query_available_offers(self, user_id: str) -> dict[str, Any]:
+        if user_id not in self._profiles:
+            raise BusinessClientError("用户不存在。", error_code="USER_NOT_FOUND", status_code=404)
+        return {"offers": self._available_offer_list(user_id)}
+
+    async def recommend_offers(
+        self,
+        user_id: str,
+        need: str | None = None,
+        budget: float | None = None,
+    ) -> dict[str, Any]:
+        if user_id not in self._profiles:
+            raise BusinessClientError("用户不存在。", error_code="USER_NOT_FOUND", status_code=404)
+        offers = self._available_offer_list(user_id)
+        if budget is not None:
+            offers = [offer for offer in offers if float(offer["monthly_fee_delta"]) <= budget]
+        tokens = _offer_need_tokens(need or "")
+        if tokens:
+            scored: list[tuple[int, dict[str, Any]]] = []
+            for offer in offers:
+                text = " ".join([offer["name"], offer["description"], " ".join(offer.get("tags", []))]).lower()
+                scored.append((sum(1 for token in tokens if token.lower() in text), offer))
+            matched = [offer for score, offer in sorted(scored, key=lambda item: item[0], reverse=True) if score > 0]
+            offers = matched or offers
+        return {"offers": offers[:3]}
+
+    async def query_order(self, user_id: str, order_id: str) -> dict[str, Any]:
+        if user_id not in self._profiles:
+            raise BusinessClientError("用户不存在。", error_code="USER_NOT_FOUND", status_code=404)
+        order = self._orders.get(order_id.upper())
+        if not order or order.get("user_id") != user_id:
+            raise BusinessClientError("订单不存在或不属于当前用户。", error_code="ORDER_NOT_FOUND", status_code=404)
+        return deepcopy(order)
+
+    async def query_recent_orders(self, user_id: str, limit: int = 3) -> dict[str, Any]:
+        if user_id not in self._profiles:
+            raise BusinessClientError("用户不存在。", error_code="USER_NOT_FOUND", status_code=404)
+        orders = [deepcopy(order) for order in self._orders.values() if order.get("user_id") == user_id]
+        orders.sort(key=lambda order: order.get("created_at", ""), reverse=True)
+        return {"orders": orders[: max(1, limit)]}
+
+    def _available_offer_list(self, user_id: str) -> list[dict[str, Any]]:
+        profile = self._profiles[user_id]
+        package = self._packages.get(user_id)
+        if not package:
+            return []
+        level = profile.get("level", "")
+        package_name = package.get("package_name", "")
+        offers = []
+        for offer in self._offers.values():
+            if level not in offer.get("eligible_levels", []):
+                continue
+            if package_name not in offer.get("applicable_packages", []):
+                continue
+            offers.append(_public_offer(offer))
+        return offers
 
 
 class HttpBusinessClient(BusinessClient):
@@ -223,6 +394,26 @@ class HttpBusinessClient(BusinessClient):
             raise BusinessClientError("无权查看该工单。", error_code="TICKET_FORBIDDEN", status_code=403)
         return ticket
 
+    async def query_available_offers(self, user_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/internal/users/{user_id}/offers", retry=True)
+
+    async def recommend_offers(
+        self,
+        user_id: str,
+        need: str | None = None,
+        budget: float | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"need": need}
+        if budget is not None:
+            payload["budget"] = budget
+        return await self._request("POST", f"/internal/users/{user_id}/offers/recommend", json=payload)
+
+    async def query_order(self, user_id: str, order_id: str) -> dict[str, Any]:
+        return await self._request("GET", f"/internal/users/{user_id}/orders/{order_id}", retry=True)
+
+    async def query_recent_orders(self, user_id: str, limit: int = 3) -> dict[str, Any]:
+        return await self._request("GET", f"/internal/users/{user_id}/orders", params={"limit": limit}, retry=True)
+
     async def _request(
         self,
         method: str,
@@ -232,7 +423,18 @@ class HttpBusinessClient(BusinessClient):
         json: dict[str, Any] | None = None,
         retry: bool = False,
     ) -> dict[str, Any]:
+        operation = _operation_name(method, path)
+        started = monotonic()
+        client_type = type(self).__name__
         if self._is_circuit_open():
+            metrics_recorder.record_business_client_circuit_open(operation=operation, client_type=client_type)
+            metrics_recorder.record_business_client_request(
+                operation=operation,
+                client_type=client_type,
+                result="circuit_open",
+                latency_ms=_elapsed_since_ms(started),
+                error_code="BUSINESS_CIRCUIT_OPEN",
+            )
             raise BusinessClientError(
                 "业务服务连续失败，短时间内已熔断。",
                 error_code="BUSINESS_CIRCUIT_OPEN",
@@ -246,19 +448,45 @@ class HttpBusinessClient(BusinessClient):
                 response = await client.request(method, path, params=params, json=json)
                 if response.status_code >= 500 and index + 1 < attempts:
                     self._record_failure()
+                    metrics_recorder.record_business_client_retry(operation=operation, client_type=client_type)
                     await self._sleep_before_retry(index)
                     continue
                 if response.status_code >= 400:
                     if response.status_code >= 500:
                         self._record_failure()
-                    raise self._build_error(response)
+                    error = self._build_error(response)
+                    metrics_recorder.record_business_client_request(
+                        operation=operation,
+                        client_type=client_type,
+                        result="error",
+                        latency_ms=_elapsed_since_ms(started),
+                        error_code=error.error_code,
+                        status_code=response.status_code,
+                    )
+                    raise error
                 self._record_success()
+                metrics_recorder.record_business_client_request(
+                    operation=operation,
+                    client_type=client_type,
+                    result="success",
+                    latency_ms=_elapsed_since_ms(started),
+                    status_code=response.status_code,
+                )
                 return response.json()
             except httpx.TimeoutException as exc:
                 self._record_failure()
                 if index + 1 < attempts:
+                    metrics_recorder.record_business_client_retry(operation=operation, client_type=client_type)
                     await self._sleep_before_retry(index)
                     continue
+                metrics_recorder.record_business_client_timeout(operation=operation, client_type=client_type)
+                metrics_recorder.record_business_client_request(
+                    operation=operation,
+                    client_type=client_type,
+                    result="timeout",
+                    latency_ms=_elapsed_since_ms(started),
+                    error_code="BUSINESS_TIMEOUT",
+                )
                 raise BusinessClientError(
                     "业务服务调用超时。",
                     error_code="BUSINESS_TIMEOUT",
@@ -267,13 +495,28 @@ class HttpBusinessClient(BusinessClient):
             except httpx.TransportError as exc:
                 self._record_failure()
                 if index + 1 < attempts:
+                    metrics_recorder.record_business_client_retry(operation=operation, client_type=client_type)
                     await self._sleep_before_retry(index)
                     continue
+                metrics_recorder.record_business_client_request(
+                    operation=operation,
+                    client_type=client_type,
+                    result="transport_error",
+                    latency_ms=_elapsed_since_ms(started),
+                    error_code="BUSINESS_SERVICE_UNAVAILABLE",
+                )
                 raise BusinessClientError(
                     "业务服务暂不可用。",
                     error_code="BUSINESS_SERVICE_UNAVAILABLE",
                     retriable=True,
                 ) from exc
+        metrics_recorder.record_business_client_request(
+            operation=operation,
+            client_type=client_type,
+            result="error",
+            latency_ms=_elapsed_since_ms(started),
+            error_code="BUSINESS_CLIENT_ERROR",
+        )
         raise BusinessClientError("业务服务调用失败。", retriable=True)
 
     def _get_client(self) -> httpx.AsyncClient:
@@ -346,3 +589,61 @@ def create_business_client() -> BusinessClient:
             timeout_ms=settings.business_service_timeout_ms,
         )
     return MockBusinessClient()
+
+
+def _elapsed_since_ms(started: float) -> float:
+    return round((monotonic() - started) * 1000, 2)
+
+
+def _operation_name(method: str, path: str) -> str:
+    """把具体 URL 收敛成低基数 operation，避免用户 ID 或订单号进入指标标签。"""
+
+    normalized = path.lower()
+    if normalized.endswith("/package") and method.upper() == "GET":
+        return "query_user_package"
+    if normalized.endswith("/package/change"):
+        return "change_package"
+    if normalized.endswith("/bill"):
+        return "query_bill"
+    if normalized.endswith("/offers") and method.upper() == "GET":
+        return "query_available_offers"
+    if normalized.endswith("/offers/recommend"):
+        return "recommend_offers"
+    if normalized.endswith("/orders") and method.upper() == "GET":
+        return "query_recent_orders"
+    if "/orders/" in normalized:
+        return "query_order"
+    if normalized == "/internal/tickets" and method.upper() == "POST":
+        return "create_ticket"
+    if normalized.startswith("/internal/tickets/"):
+        return "query_ticket"
+    if normalized.startswith("/internal/users/") and method.upper() == "GET":
+        return "query_user_profile"
+    return f"{method.lower()}_business_request"
+
+
+def _public_offer(offer: dict[str, Any]) -> dict[str, Any]:
+    public_fields = {
+        "offer_id",
+        "name",
+        "offer_type",
+        "description",
+        "benefits",
+        "monthly_fee_delta",
+        "valid_until",
+        "tags",
+        "recommend_reason",
+    }
+    return {key: deepcopy(value) for key, value in offer.items() if key in public_fields}
+
+
+def _offer_need_tokens(need: str) -> list[str]:
+    text = need.strip().lower()
+    tokens = [text] if text else []
+    if "流量" in text or "data" in text or "不够" in text:
+        tokens.extend(["流量", "data"])
+    if "会员" in text or "权益" in text or "视频" in text:
+        tokens.extend(["会员", "权益", "video"])
+    if "家庭" in text or "宽带" in text or "融合" in text:
+        tokens.extend(["家庭", "宽带", "融合"])
+    return tokens

@@ -4,6 +4,10 @@ from mock_business_service import data
 from mock_business_service.schemas import (
     BillResponse,
     ErrorDetail,
+    OfferListResponse,
+    OfferRecommendRequest,
+    OrderListResponse,
+    OrderResponse,
     PackageChangeRequest,
     PackageChangeResponse,
     PackageResponse,
@@ -85,3 +89,34 @@ def get_ticket(ticket_id: str) -> dict:
     if not ticket:
         _business_error(404, "TICKET_NOT_FOUND", "工单不存在。")
     return ticket
+
+
+@app.get("/internal/users/{user_id}/offers", response_model=OfferListResponse)
+def get_user_offers(user_id: str) -> dict:
+    if not data.get_user(user_id):
+        _business_error(404, "USER_NOT_FOUND", "用户不存在。")
+    return {"offers": data.get_available_offers(user_id)}
+
+
+@app.post("/internal/users/{user_id}/offers/recommend", response_model=OfferListResponse)
+def recommend_user_offers(user_id: str, request: OfferRecommendRequest) -> dict:
+    if not data.get_user(user_id):
+        _business_error(404, "USER_NOT_FOUND", "用户不存在。")
+    return {"offers": data.recommend_offers(user_id, need=request.need, budget=request.budget)}
+
+
+@app.get("/internal/users/{user_id}/orders/{order_id}", response_model=OrderResponse)
+def get_user_order(user_id: str, order_id: str) -> dict:
+    if not data.get_user(user_id):
+        _business_error(404, "USER_NOT_FOUND", "用户不存在。")
+    order = data.get_order(user_id, order_id)
+    if not order:
+        _business_error(404, "ORDER_NOT_FOUND", "订单不存在或不属于当前用户。")
+    return order
+
+
+@app.get("/internal/users/{user_id}/orders", response_model=OrderListResponse)
+def get_user_orders(user_id: str, limit: int = Query(default=3, ge=1, le=10)) -> dict:
+    if not data.get_user(user_id):
+        _business_error(404, "USER_NOT_FOUND", "用户不存在。")
+    return {"orders": data.get_recent_orders(user_id, limit=limit)}

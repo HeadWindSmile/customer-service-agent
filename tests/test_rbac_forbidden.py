@@ -81,3 +81,22 @@ def test_request_target_and_slot_target_conflict_is_forbidden():
         assert response.tool_calls == []
 
     asyncio.run(scenario())
+
+
+def test_agent_order_query_requires_target_user_id():
+    async def scenario():
+        agent = CustomerAgent()
+        response = await agent.handle(
+            ChatRequest(
+                user_id="agent001",
+                session_id="rbac-forbidden-agent-order-no-target",
+                role="agent",
+                message="帮客户查订单 ORD-20260701001 的状态",
+            )
+        )
+
+        assert response.error
+        assert "必须提供 target_user_id" in response.answer
+        assert response.tool_calls == []
+
+    asyncio.run(scenario())

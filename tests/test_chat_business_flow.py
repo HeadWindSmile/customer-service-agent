@@ -54,3 +54,61 @@ def test_chat_bill_query_records_business_failure_in_tool_call():
     assert response.tool_calls[0].output["error_code"] == "BILL_NOT_FOUND"
     assert response.tool_calls[0].error_message == "账单不存在。"
     assert "账单查询失败" in response.answer
+
+
+def test_chat_offer_query_uses_http_business_client_and_records_tool_call():
+    agent = _agent_with_http_business_client()
+    request = ChatRequest(
+        user_id="u1001",
+        session_id="phase16-offer-query",
+        role="user",
+        message="我有哪些可办理优惠权益？",
+    )
+
+    response = asyncio.run(agent.handle(request))
+
+    assert response.intent == "offer_query"
+    assert response.error is None
+    call = response.tool_calls[0]
+    assert call.tool_name == "query_available_offers"
+    assert call.success is True
+    assert call.output["offers"]
+    assert call.permission == "OFFER_QUERY_SELF"
+
+
+def test_chat_offer_recommend_uses_http_business_client():
+    agent = _agent_with_http_business_client()
+    request = ChatRequest(
+        user_id="u1001",
+        session_id="phase16-offer-recommend",
+        role="user",
+        message="我流量不够，预算20元以内，推荐一个优惠",
+    )
+
+    response = asyncio.run(agent.handle(request))
+
+    assert response.intent == "offer_recommend"
+    assert response.error is None
+    assert response.tool_calls[0].tool_name == "recommend_offers"
+    assert response.tool_calls[0].output["offers"][0]["offer_id"] == "OFF-DATA-20G"
+
+
+def test_chat_order_query_uses_http_business_client_and_audit():
+    agent = _agent_with_http_business_client()
+    request = ChatRequest(
+        user_id="agent001",
+        session_id="phase16-order-query",
+        role="agent",
+        target_user_id="u1001",
+        message="帮客户查订单 ORD-20260701001 的状态",
+    )
+
+    response = asyncio.run(agent.handle(request))
+
+    assert response.intent == "order_query"
+    assert response.error is None
+    call = response.tool_calls[0]
+    assert call.tool_name == "query_order"
+    assert call.output["order_id"] == "ORD-20260701001"
+    assert call.permission == "ORDER_QUERY_AGENT"
+    assert call.audit_logged is True

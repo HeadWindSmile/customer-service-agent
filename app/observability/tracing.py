@@ -6,6 +6,22 @@ from typing import Any
 from uuid import uuid4
 
 
+LATENCY_BREAKDOWN_STAGES = (
+    "safety.input",
+    "memory.load",
+    "query.rewrite",
+    "intent.classify",
+    "auth.build_context",
+    "router.route",
+    "rag.retrieve",
+    "rag.answer",
+    "tool.call",
+    "safety.output",
+    "memory.save",
+    "event.publish",
+)
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -94,6 +110,7 @@ class TraceContext:
     started_at: float
     created_at: str = field(default_factory=_utc_now)
     ended_at: str | None = None
+    _ended_perf: float | None = field(default=None, repr=False)
     attributes: dict[str, Any] = field(default_factory=dict)
     spans: list[TraceSpan] = field(default_factory=list)
     events: list[TraceEvent] = field(default_factory=list)
@@ -105,7 +122,8 @@ class TraceContext:
 
     @property
     def latency_ms(self) -> float:
-        return round((perf_counter() - self.started_at) * 1000, 2)
+        ended = self._ended_perf or perf_counter()
+        return round((ended - self.started_at) * 1000, 2)
 
     def add_attribute(self, key: str, value: Any) -> None:
         self.attributes[key] = value
@@ -147,9 +165,52 @@ class TraceContext:
     def finish(self, error: str | None = None) -> None:
         while self._active_span_ids:
             self.end_span(error=error)
-        self.ended_at = _utc_now()
+        if self.ended_at is None:
+            self.ended_at = _utc_now()
+            self._ended_perf = perf_counter()
         if error:
             self.add_attribute("error", error)
+        self.add_attribute("latency_breakdown", self.latency_breakdown())
+
+    def latency_breakdown(self) -> dict[str, Any]:
+        """把 span 汇总成适合单次请求演示的耗时拆解。
+
+        span 仍保留完整明细；breakdown 是面试演示和排查时更易读的摘要。Router
+        span 包含其子阶段耗时，因此这里明确标注为 inclusive，避免把所有阶段简单
+        相加后误解为总耗时。
+        """
+
+        stages: dict[str, dict[str, Any]] = {}
+        for stage in LATENCY_BREAKDOWN_STAGES:
+            matched = [span for span in self.spans if span.name == stage]
+            if not matched:
+                stages[stage] = {
+                    "count": 0,
+                    "latency_ms": 0.0,
+                    "avg_latency_ms": 0.0,
+                    "status": "not_run",
+                }
+                continue
+            latency_ms = round(sum(span.latency_ms for span in matched), 2)
+            status = "error" if any(span.status == "error" for span in matched) else "ok"
+            payload: dict[str, Any] = {
+                "count": len(matched),
+                "latency_ms": latency_ms,
+                "avg_latency_ms": round(latency_ms / len(matched), 2),
+                "status": status,
+            }
+            if stage == "router.route":
+                payload["inclusive"] = True
+            stages[stage] = payload
+
+        tracked_names = set(LATENCY_BREAKDOWN_STAGES)
+        untracked_latency_ms = round(sum(span.latency_ms for span in self.spans if span.name not in tracked_names), 2)
+        return {
+            "total_latency_ms": self.latency_ms,
+            "stages": stages,
+            "untracked_latency_ms": untracked_latency_ms,
+            "note": "router.route 是包含子阶段的耗时；rag/tool/event 等子阶段已单独列出。",
+        }
 
     def to_log_payload(self) -> dict[str, Any]:
         return {"trace_id": self.trace_id, "latency_ms": self.latency_ms, **self.attributes}
@@ -221,4 +282,3 @@ def end_span(span: TraceSpan | str | None = None, error: str | None = None) -> N
     trace = get_current_trace()
     if trace:
         trace.end_span(span, error=error)
-

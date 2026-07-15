@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.rag.document import KnowledgeChunk
 from app.rag.embeddings import BaseEmbedding, MockEmbedding
 from app.schemas.chat import Source
@@ -147,16 +148,112 @@ class ChromaVectorStore(BaseVectorStore):
 
 
 class MilvusVectorStore(BaseVectorStore):
-    """Milvus 适配层占位，第二阶段只保留边界，不连接真实 Milvus。"""
+    """Milvus 真实适配层。
+
+    默认本地模式不会强制安装或启动 Milvus；只有 `VECTOR_STORE=milvus` 且
+    `MILVUS_URI`、pymilvus 均可用时才连接真实服务，其他情况由工厂回退到 mock。
+    """
+
+    def __init__(
+        self,
+        embedding: BaseEmbedding,
+        collection_name: str,
+        uri: str,
+        token: str = "",
+        db_name: str = "",
+        timeout_seconds: float = 3,
+        metric_type: str = "COSINE",
+    ) -> None:
+        if not uri:
+            raise RuntimeError("MILVUS_URI 未配置，已由调用方回退到 MockVectorStore。")
+        try:
+            from pymilvus import MilvusClient  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("未安装 pymilvus，已由调用方回退到 MockVectorStore。") from exc
+
+        self.embedding = embedding
+        self.collection_name = collection_name
+        self.metric_type = metric_type.upper()
+        client_kwargs: dict[str, Any] = {"uri": uri, "timeout": timeout_seconds}
+        if token:
+            client_kwargs["token"] = token
+        if db_name:
+            client_kwargs["db_name"] = db_name
+        self.client = MilvusClient(**client_kwargs)
 
     def add_chunks(self, chunks: list[KnowledgeChunk]) -> None:
-        raise NotImplementedError("第 2 阶段不接入真实 Milvus，请使用 mock 或 chroma。")
+        if not chunks:
+            return
+        vectors = self.embedding.embed_documents([chunk.content for chunk in chunks])
+        if not vectors:
+            return
+        self._ensure_collection(len(vectors[0]))
+        rows = []
+        for chunk, vector in zip(chunks, vectors, strict=True):
+            metadata = chunk.to_metadata()
+            rows.append(
+                {
+                    "id": chunk.chunk_id,
+                    "vector": vector,
+                    "doc_id": chunk.doc_id,
+                    "title": chunk.title,
+                    "content": chunk.content,
+                    "source": chunk.source,
+                    "section": chunk.section,
+                    "metadata_json": json.dumps(metadata, ensure_ascii=False),
+                }
+            )
+        self.client.upsert(collection_name=self.collection_name, data=rows)
 
     def search(self, query: str, top_k: int) -> list[Source]:
-        raise NotImplementedError("第 2 阶段不接入真实 Milvus，请使用 mock 或 chroma。")
+        if top_k <= 0 or self.is_empty():
+            return []
+        result = self.client.search(
+            collection_name=self.collection_name,
+            data=[self.embedding.embed_query(query)],
+            anns_field="vector",
+            limit=top_k,
+            output_fields=["doc_id", "title", "content", "source", "section", "metadata_json"],
+        )
+        hits = result[0] if result else []
+        sources: list[Source] = []
+        for hit in hits:
+            entity = _hit_entity(hit)
+            metadata = _safe_json_loads(str(entity.get("metadata_json") or "{}"))
+            score = _milvus_score(hit, self.metric_type)
+            sources.append(
+                Source(
+                    doc_id=str(entity.get("doc_id", _hit_id(hit))),
+                    title=str(entity.get("title", "")),
+                    content=str(entity.get("content", "")),
+                    score=round(score, 4),
+                    metadata=metadata,
+                )
+            )
+        return sources
 
     def is_empty(self) -> bool:
-        return True
+        if not self.client.has_collection(self.collection_name):
+            return True
+        try:
+            stats = self.client.get_collection_stats(self.collection_name)
+            return int(stats.get("row_count", 0)) == 0
+        except Exception:
+            return True
+
+    def _ensure_collection(self, dimension: int) -> None:
+        if self.client.has_collection(self.collection_name):
+            return
+        self.client.create_collection(
+            collection_name=self.collection_name,
+            dimension=dimension,
+            primary_field_name="id",
+            id_type="string",
+            vector_field_name="vector",
+            metric_type=self.metric_type,
+            auto_id=False,
+            enable_dynamic_field=True,
+        )
 
 
 def create_vector_store(
@@ -169,9 +266,22 @@ def create_vector_store(
     if store_type == "chroma":
         try:
             return ChromaVectorStore(embedding, persist_dir / "chroma", collection_name)
-        except RuntimeError:
+        except Exception:
             return MockVectorStore(embedding, persist_dir / "mock_index.json")
     if store_type == "milvus":
+        try:
+            return MilvusVectorStore(
+                embedding=embedding,
+                collection_name=settings.milvus_collection or collection_name,
+                uri=settings.milvus_uri,
+                token=settings.milvus_token,
+                db_name=settings.milvus_db_name,
+                timeout_seconds=settings.milvus_timeout_seconds,
+                metric_type=settings.milvus_metric_type,
+            )
+        except Exception:
+            return MockVectorStore(embedding, persist_dir / "mock_index.json")
+    if store_type == "mock":
         return MockVectorStore(embedding, persist_dir / "mock_index.json")
     return MockVectorStore(embedding, persist_dir / "mock_index.json")
 
@@ -195,3 +305,37 @@ def _lexical_similarity(query_terms: set[str], text: str) -> float:
         return 0.0
     text_terms = _text_terms(text)
     return len(query_terms & text_terms) / len(query_terms)
+
+
+def _hit_entity(hit: Any) -> dict[str, Any]:
+    if isinstance(hit, dict):
+        return dict(hit.get("entity") or hit)
+    entity = getattr(hit, "entity", None)
+    if isinstance(entity, dict):
+        return entity
+    return {}
+
+
+def _hit_id(hit: Any) -> str:
+    if isinstance(hit, dict):
+        return str(hit.get("id", ""))
+    return str(getattr(hit, "id", ""))
+
+
+def _milvus_score(hit: Any, metric_type: str) -> float:
+    raw_score = 0.0
+    if isinstance(hit, dict):
+        raw_score = float(hit.get("distance", hit.get("score", 0.0)))
+    else:
+        raw_score = float(getattr(hit, "distance", getattr(hit, "score", 0.0)))
+    if metric_type in {"COSINE", "IP"}:
+        return raw_score
+    return 1 / (1 + raw_score)
+
+
+def _safe_json_loads(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        return {}

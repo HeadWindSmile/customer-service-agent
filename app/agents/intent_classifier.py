@@ -18,7 +18,9 @@ class IntentClassifier:
     _month_pattern = re.compile(r"(20\d{2}[-年]?\d{1,2}|本月|上月)")
     _target_user_pattern = re.compile(r"(?:用户|客户)?\s*([uU]\d{3,}|user[_-]?\d+)")
     _ticket_pattern = re.compile(r"(TCK-[A-Za-z0-9]{6,}|工单[号：:\s]*([A-Za-z0-9-]{6,}))", re.IGNORECASE)
+    _order_pattern = re.compile(r"((?:ORD|PKG)-[A-Za-z0-9]{6,})", re.IGNORECASE)
     _phone_pattern = re.compile(r"(?<!\d)(1[3-9]\d{9})(?!\d)")
+    _budget_pattern = re.compile(r"(?:预算|不超过|以内|每月)?\s*(\d+(?:\.\d+)?)\s*元")
 
     def __init__(self, intent_chain: IntentChain | None = None) -> None:
         self.intent_chain = intent_chain or IntentChain()
@@ -70,6 +72,12 @@ class IntentClassifier:
             slots.setdefault("ticket_id", self._extract_ticket_id(text))
             return self._result(IntentName.TICKET_QUERY, slots, 0.9, "命中工单查询关键词")
 
+        if self._is_order_query(text):
+            order_id = self._extract_order_id(text)
+            if order_id:
+                slots.setdefault("order_id", order_id)
+            return self._result(IntentName.ORDER_QUERY, slots, 0.9, "命中订单查询关键词")
+
         if self._is_network_repair(text):
             slots.setdefault("issue_type", "network")
             return self._result(IntentName.NETWORK_REPAIR, slots, 0.9, "命中网络报修关键词")
@@ -81,6 +89,17 @@ class IntentClassifier:
         if self._is_package_change(text):
             slots.setdefault("target_package", self._extract_target_package(text))
             return self._result(IntentName.PACKAGE_CHANGE, slots, 0.92, "命中套餐办理/变更关键词")
+
+        if self._is_offer_recommend(text):
+            slots.setdefault("need", self._extract_offer_need(text))
+            budget = self._extract_budget(text)
+            if budget is not None:
+                slots.setdefault("budget", budget)
+            return self._result(IntentName.OFFER_RECOMMEND, slots, 0.9, "命中优惠推荐关键词")
+
+        if self._is_offer_query(text):
+            slots.setdefault("offer_type", self._extract_offer_type(text))
+            return self._result(IntentName.OFFER_QUERY, slots, 0.89, "命中优惠/权益查询关键词")
 
         if self._is_package_recommend(text):
             slots.setdefault("product_name", "套餐")
@@ -126,6 +145,10 @@ class IntentClassifier:
         if ticket_id:
             slots["ticket_id"] = ticket_id
 
+        order_id = self._extract_order_id(text)
+        if order_id:
+            slots["order_id"] = order_id
+
     def _extract_month(self, text: str) -> str:
         match = self._month_pattern.search(text)
         return match.group(1).replace("年", "-") if match else "本月"
@@ -152,6 +175,37 @@ class IntentClassifier:
             return ""
         return (match.group(2) or match.group(1)).upper().replace("工单", "").strip(" ：:")
 
+    def _extract_order_id(self, text: str) -> str:
+        match = self._order_pattern.search(text)
+        return match.group(1).upper() if match else ""
+
+    def _extract_budget(self, text: str) -> float | None:
+        match = self._budget_pattern.search(text)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+
+    def _extract_offer_type(self, text: str) -> str:
+        if self._contains(text, ["流量", "加油包", "不够用"]):
+            return "data_booster"
+        if self._contains(text, ["会员", "权益", "视频"]):
+            return "member_benefit"
+        if self._contains(text, ["家庭", "宽带", "融合"]):
+            return "family_bundle"
+        return "general"
+
+    def _extract_offer_need(self, text: str) -> str:
+        if self._contains(text, ["流量", "加油包", "不够用"]):
+            return "流量不够用"
+        if self._contains(text, ["会员", "权益", "视频"]):
+            return "会员权益"
+        if self._contains(text, ["家庭", "宽带", "融合"]):
+            return "家庭宽带融合"
+        return "优惠权益"
+
     def _contains(self, text: str, keywords: list[str]) -> bool:
         return any(keyword in text for keyword in keywords)
 
@@ -162,6 +216,13 @@ class IntentClassifier:
         if not self._contains(text, ["工单", "TCK-", "报修单"]):
             return False
         return self._contains(text, ["查询", "查", "进度", "状态", "到哪", "处理到", "怎么样"])
+
+    def _is_order_query(self, text: str) -> bool:
+        if self._extract_order_id(text):
+            return self._contains(text, ["订单", "状态", "进度", "查", "查询", "办理", "申请"]) or "ORD-" in text.upper()
+        if not self._contains(text, ["订单", "业务单", "申请单", "办理进度"]):
+            return False
+        return self._contains(text, ["查询", "查", "进度", "状态", "到哪", "处理到", "最近", "我的"])
 
     def _is_network_repair(self, text: str) -> bool:
         return self._contains(text, ["报修", "上门维修", "网络修复", "宽带维修"]) and self._contains(
@@ -194,6 +255,16 @@ class IntentClassifier:
         if not self._contains(text, ["套餐", "流量", "资费"]):
             return False
         return self._contains(text, ["推荐", "适合", "哪个更好", "怎么选", "不够用", "性价比", "划算"])
+
+    def _is_offer_recommend(self, text: str) -> bool:
+        if not self._contains(text, ["优惠", "权益", "活动", "offer", "流量包", "加油包", "会员"]):
+            return False
+        return self._contains(text, ["推荐", "适合", "怎么选", "不够用", "划算", "预算", "想要"])
+
+    def _is_offer_query(self, text: str) -> bool:
+        if not self._contains(text, ["优惠", "权益", "活动", "offer", "流量包", "加油包", "会员"]):
+            return False
+        return self._contains(text, ["查询", "查", "可办理", "有什么", "有哪些", "能办", "能领", "推荐"])
 
     def _is_package_faq(self, text: str) -> bool:
         if not self._contains(text, ["套餐", "5G畅享", "家庭融合", "校园套餐", "基础套餐"]):

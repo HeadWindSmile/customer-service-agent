@@ -8,6 +8,7 @@ from app.agents.prompts import NO_SOURCE_ANSWER
 from app.audit import AuditLogger
 from app.auth.context import AuthContext
 from app.auth.rbac import ForbiddenError, Permission, PermissionChecker
+from app.observability.metrics import metrics_recorder
 from app.observability.tracing import add_attribute, add_event, end_span, get_current_trace, start_span
 from app.rag.retriever import KnowledgeRetriever
 from app.safety.guard import TOOL_PARAM_BLOCKED_ANSWER, SafetyGuard, SafetyViolation
@@ -15,6 +16,8 @@ from app.safety.risk_level import SafetyAction
 from app.schemas.chat import IntentResult, Source, ToolCall
 from app.tools.bill_tool import BillTool
 from app.tools.business_client import BusinessClient, BusinessClientError, create_business_client
+from app.tools.offer_tool import OfferTool
+from app.tools.order_tool import OrderTool
 from app.tools.package_tool import PackageTool
 from app.tools.ticket_tool import TicketTool
 from app.tools.user_tool import UserTool
@@ -56,6 +59,8 @@ class CustomerRouter:
         self.bill_tool = BillTool(business_client)
         self.ticket_tool = TicketTool(business_client)
         self.user_tool = UserTool(business_client)
+        self.offer_tool = OfferTool(business_client)
+        self.order_tool = OrderTool(business_client)
         self.routes: dict[str, RouteHandler] = {
             IntentName.FAQ_QUERY.value: self._handle_faq,
             IntentName.PACKAGE_QUERY.value: self._handle_package_query,
@@ -67,6 +72,9 @@ class CustomerRouter:
             IntentName.NETWORK_REPAIR.value: self._handle_network_repair,
             IntentName.TICKET_CREATE.value: self._handle_ticket_create,
             IntentName.TICKET_QUERY.value: self._handle_ticket_query,
+            IntentName.OFFER_QUERY.value: self._handle_offer_query,
+            IntentName.OFFER_RECOMMEND.value: self._handle_offer_recommend,
+            IntentName.ORDER_QUERY.value: self._handle_order_query,
             IntentName.HUMAN_TRANSFER.value: self._handle_human_transfer,
             IntentName.UNKNOWN.value: self._handle_unknown,
         }
@@ -410,6 +418,136 @@ class CustomerRouter:
         answer = f"工单 {output['ticket_id']} 当前状态：{output['status']}，处理说明：{output['summary']}"
         return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
 
+    async def _handle_offer_query(
+        self,
+        intent_result: IntentResult,
+        message: str,
+        user_id: str,
+        recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
+    ) -> RouteResult:
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.OFFER_QUERY_SELF,
+            Permission.OFFER_QUERY_AGENT,
+        )
+        offer_type = str(intent_result.slots.get("offer_type", "general"))
+        output, call = await self._call_tool(
+            "query_available_offers",
+            {"user_id": user_id, "offer_type": offer_type},
+            lambda: self.offer_tool.query_available_offers(user_id),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="offer_query",
+            resource_type="offer",
+            audit_metadata={"offer_type": offer_type},
+        )
+        if not call.success:
+            return RouteResult(answer="优惠权益查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
+        offers = output.get("offers", [])
+        answer = _format_offer_answer(offers, prefix="当前可办理的优惠/权益")
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
+
+    async def _handle_offer_recommend(
+        self,
+        intent_result: IntentResult,
+        message: str,
+        user_id: str,
+        recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
+    ) -> RouteResult:
+        need = str(intent_result.slots.get("need", message)).strip()
+        budget_value = intent_result.slots.get("budget")
+        try:
+            budget = float(budget_value) if budget_value not in (None, "") else None
+        except (TypeError, ValueError):
+            budget = None
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.OFFER_RECOMMEND_SELF,
+            Permission.OFFER_RECOMMEND_AGENT,
+        )
+        output, call = await self._call_tool(
+            "recommend_offers",
+            {"user_id": user_id, "need": need, "budget": budget},
+            lambda: self.offer_tool.recommend_offers(user_id, need=need, budget=budget),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="offer_recommend",
+            resource_type="offer",
+            audit_metadata={"need": need, "budget": budget},
+        )
+        if not call.success:
+            return RouteResult(answer="优惠推荐失败，请稍后再试或转人工客服。", tool_calls=[call], rewritten_query=rewritten_query)
+        offers = output.get("offers", [])
+        answer = _format_offer_answer(offers, prefix="结合你的诉求，优先推荐")
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
+
+    async def _handle_order_query(
+        self,
+        intent_result: IntentResult,
+        message: str,
+        user_id: str,
+        recent_turns: list[dict[str, str]],
+        memory_summary: str,
+        key_facts: dict[str, Any],
+        rewritten_query: str,
+        auth_context: AuthContext,
+        trace_id: str,
+    ) -> RouteResult:
+        order_id = str(intent_result.slots.get("order_id", "")).strip().upper()
+        permission = self.permission_checker.required_permission(
+            auth_context,
+            Permission.ORDER_QUERY_SELF,
+            Permission.ORDER_QUERY_AGENT,
+        )
+        if order_id:
+            output, call = await self._call_tool(
+                "query_order",
+                {"user_id": user_id, "order_id": order_id},
+                lambda: self.order_tool.query_order(user_id, order_id),
+                auth_context=auth_context,
+                trace_id=trace_id,
+                intent=intent_result.intent,
+                required_permission=permission,
+                audit_action="order_query",
+                resource_type="order",
+                audit_metadata={"order_id": order_id},
+            )
+            if not call.success:
+                return RouteResult(answer="订单查询失败，请稍后再试或核对订单号。", tool_calls=[call], rewritten_query=rewritten_query)
+            answer = _format_order_answer(output)
+            return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
+
+        output, call = await self._call_tool(
+            "query_recent_orders",
+            {"user_id": user_id, "limit": 3},
+            lambda: self.order_tool.query_recent_orders(user_id, limit=3),
+            auth_context=auth_context,
+            trace_id=trace_id,
+            intent=intent_result.intent,
+            required_permission=permission,
+            audit_action="order_query",
+            resource_type="order",
+            audit_metadata={"limit": 3},
+        )
+        if not call.success:
+            return RouteResult(answer="订单查询失败，请稍后再试。", tool_calls=[call], rewritten_query=rewritten_query)
+        answer = _format_recent_orders_answer(output.get("orders", []))
+        return RouteResult(answer=answer, tool_calls=[call], rewritten_query=rewritten_query)
+
     async def _handle_human_transfer(
         self,
         intent_result: IntentResult,
@@ -456,15 +594,22 @@ class CustomerRouter:
         sources = self.retriever.search(search_query, top_k=top_k)
         trace = get_current_trace()
         cache_hit = bool(trace.attributes.get("rag_cache_hit")) if trace else False
+        retrieval_config = dict(trace.attributes.get("rag_retrieval_config") or {}) if trace else {}
         source_summary = {
             "top_k": top_k,
             "cache_hit": cache_hit,
             "source_count": len(sources),
             "doc_ids": [source.doc_id for source in sources],
             "scores": [source.score for source in sources],
+            **retrieval_config,
         }
         add_attribute("rag_retrieval", source_summary)
         add_event("rag.retrieved", source_summary)
+        metrics_recorder.record_rag_retrieval(
+            scenario=scenario,
+            cache_hit=cache_hit,
+            source_count=len(sources),
+        )
         end_span(retrieve_span)
         if not sources:
             return RouteResult(answer=NO_SOURCE_ANSWER, rewritten_query=search_query)
@@ -607,7 +752,38 @@ class CustomerRouter:
 
 def _audit_metadata_from_output(output: dict[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
-    for key in ("status", "order_id", "ticket_id", "issue_type", "month", "target_package", "error_code"):
+    for key in ("status", "order_id", "order_type", "ticket_id", "issue_type", "month", "target_package", "error_code"):
         if output.get(key) is not None:
             metadata[key] = output[key]
     return metadata
+
+
+def _format_offer_answer(offers: list[dict[str, Any]], *, prefix: str) -> str:
+    if not offers:
+        return "当前未查询到可办理优惠/权益，建议稍后再试或转人工客服确认。"
+    items = []
+    for offer in offers[:3]:
+        benefits = "、".join(str(item) for item in offer.get("benefits", [])[:2])
+        reason = offer.get("recommend_reason") or offer.get("description") or ""
+        items.append(
+            f"{offer.get('name')}：月增 {offer.get('monthly_fee_delta')} 元，"
+            f"权益：{benefits}。{reason}"
+        )
+    return f"{prefix}：{'；'.join(items)}"
+
+
+def _format_order_answer(order: dict[str, Any]) -> str:
+    return (
+        f"订单 {order.get('order_id')} 当前状态：{order.get('status')}。"
+        f"业务：{order.get('title')}。处理说明：{order.get('summary')}"
+    )
+
+
+def _format_recent_orders_answer(orders: list[dict[str, Any]]) -> str:
+    if not orders:
+        return "当前未查询到最近订单。你也可以提供订单号，我再帮你查具体状态。"
+    summaries = [
+        f"{order.get('order_id')}（{order.get('title')}）：{order.get('status')}"
+        for order in orders[:3]
+    ]
+    return f"你最近的订单状态如下：{'；'.join(summaries)}。如需查看某一笔详情，可以继续提供订单号。"

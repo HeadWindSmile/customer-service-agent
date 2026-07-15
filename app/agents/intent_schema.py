@@ -17,6 +17,9 @@ class IntentName(str, Enum):
     NETWORK_REPAIR = "network_repair"
     TICKET_CREATE = "ticket_create"
     TICKET_QUERY = "ticket_query"
+    OFFER_QUERY = "offer_query"
+    OFFER_RECOMMEND = "offer_recommend"
+    ORDER_QUERY = "order_query"
     HUMAN_TRANSFER = "human_transfer"
     UNKNOWN = "unknown"
 
@@ -32,6 +35,9 @@ INTENT_DESCRIPTIONS: dict[str, str] = {
     IntentName.NETWORK_REPAIR.value: "用户明确要求报修、上门维修或网络修复。",
     IntentName.TICKET_CREATE.value: "创建售后、投诉、故障等工单。",
     IntentName.TICKET_QUERY.value: "查询已有工单进度或状态。",
+    IntentName.OFFER_QUERY.value: "查询用户可办理优惠、权益、活动或可领取 offer。",
+    IntentName.OFFER_RECOMMEND.value: "根据用户流量、权益、预算等诉求推荐合适 offer。",
+    IntentName.ORDER_QUERY.value: "查询订单状态、办理进度、最近订单或指定订单详情。",
     IntentName.HUMAN_TRANSFER.value: "用户要求人工客服、真人客服或无法自助处理。",
     IntentName.UNKNOWN.value: "无法判断用户意图，或问题与客服业务无关。",
 }
@@ -41,6 +47,10 @@ SLOT_DESCRIPTIONS: dict[str, str] = {
     "target_package": "用户想办理或咨询的目标套餐名称。",
     "issue_type": "问题类型，例如 network、billing、package、general。",
     "ticket_id": "售后工单号。",
+    "order_id": "业务订单号，例如 ORD-20260701001 或 PKG-20260630001。",
+    "offer_type": "优惠权益类型，例如 data_booster、member_benefit、family_bundle。",
+    "need": "用户诉求，例如流量不够、想要会员权益、家庭宽带共享。",
+    "budget": "用户可接受的月增费用，单位元。",
     "phone_number": "脱敏后的手机号。",
     "product_name": "用户提到的业务产品名称。",
     "target_user_id": "客服代查或文本中提到的目标用户 ID。",
